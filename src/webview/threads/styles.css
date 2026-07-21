@@ -284,6 +284,47 @@ button.thread-action:hover {
   margin: 12px 0;
 }
 
+.conversation-bookmarks {
+  margin: 10px 0 2px;
+  padding: 8px;
+  background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 5px;
+}
+
+.conversation-bookmarks h2 {
+  margin: 0 0 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.conversation-bookmark-list {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+button.turn-bookmark-toggle {
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  color: var(--vscode-descriptionForeground);
+  line-height: 23px;
+  background: transparent;
+  border-color: transparent;
+}
+
+button.turn-bookmark-toggle.is-bookmarked {
+  color: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground));
+}
+
+button.turn-bookmark-toggle:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
 .conversation-interactions {
   margin: 12px 0;
 }

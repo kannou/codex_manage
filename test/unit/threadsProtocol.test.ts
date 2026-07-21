@@ -56,7 +56,8 @@ const conversationState = {
     { id: 'attachment-2', kind: 'mention', name: 'AGENTS.md', sizeBytes: 2048 },
     { id: 'attachment-3', kind: 'skill', name: 'review', description: 'Review changes' }
   ],
-  interactions: []
+  interactions: [],
+  bookmarkedTurnIds: ['turn-1']
 } as const;
 
 test('accepts only the explicit sidebar navigation messages', () => {
@@ -174,6 +175,19 @@ test('accepts bounded composer actions and rejects arbitrary conversation payloa
     threadId: 'thread-1',
     requestId: 'request-2'
   }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    turnId: 'turn-1'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    bookmarked: true
+  }), false);
 
   for (const text of ['', ' \n\t', 'x'.repeat(MAX_COMPOSER_TEXT_LENGTH + 1)]) {
     assert.equal(isThreadsWebviewMessage({
@@ -277,6 +291,14 @@ test('validates persisted navigation state and host messages', () => {
     threadId: 'thread-1',
     title: 'Thread 1',
     message: 500
+  }), false);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: { ...conversationState, bookmarkedTurnIds: ['turn-missing'] }
+  }), false);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: { ...conversationState, bookmarkedTurnIds: ['turn-1', 'turn-1'] }
   }), false);
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',

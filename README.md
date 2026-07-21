@@ -15,6 +15,7 @@ The MVP is packaged for private VSIX installation. Marketplace publication is no
 - Opens a selected thread's conversation in the same Codex sidebar, including stored user/Codex messages, turn state, and summarized work cards.
 - Sends text prompts to an existing thread, streams Codex replies in place, and stops the active turn when needed.
 - Adds PNG, JPEG, GIF, or WebP images, host-selected file references, and enabled workspace Skills to the next message from the composer Add menu.
+- Bookmarks individual turns per workspace and jumps back to them from the conversation bookmark list.
 - Starts a workspace-scoped conversation from the sidebar, applies the selected Runtime settings, and sends its first text prompt without creating a duplicate list entry.
 - Shows a compact summary in the Runtime trigger with the GPT version and variant, effective reasoning, Fast speed when selected, and non-standard sandbox permissions.
 - Keeps the last confirmed transcript visible across disconnects and re-synchronizes it with `thread/resume` plus `thread/read` after reconnecting.
@@ -71,8 +72,9 @@ Reload VS Code after installation.
 10. Use **Add** > **Mention files…** or **Add Skill…** to add file references or enabled Skills to the next message.
 11. Enter a text message and select **Send**, or press Ctrl+Enter / Cmd+Enter. Enter by itself inserts a new line.
 12. While Codex is responding, select **Stop** to interrupt that turn.
-13. Use **Reload** to reconnect and re-synchronize the selected conversation, then **Back** to return to the list.
-14. Open **View: Toggle Output** and select `Codex Thread Manager` for connection diagnostics.
+13. Use the star in a turn header to bookmark it, then select the turn in **Bookmarks** to move focus back to it.
+14. Use **Reload** to reconnect and re-synchronize the selected conversation, then **Back** to return to the list.
+15. Open **View: Toggle Output** and select `Codex Thread Manager` for connection diagnostics.
 
 Only threads whose `cwd` exactly matches one of the open workspace folder paths are shown. Threads started in a nested subdirectory are not included in this MVP.
 

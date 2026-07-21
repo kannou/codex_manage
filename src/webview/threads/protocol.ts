@@ -77,6 +77,7 @@ export interface ConversationScreenState {
   readonly availableAdditions: readonly ConversationAdditionKind[];
   readonly attachments: readonly ConversationAttachmentViewModel[];
   readonly interactions: readonly ConversationInteractionViewModel[];
+  readonly bookmarkedTurnIds: readonly string[];
   readonly notice?: string;
 }
 
@@ -172,6 +173,12 @@ export type ThreadsWebviewToHostMessage =
     readonly threadId: string;
     readonly interactionId: string;
     readonly reply: ConversationInteractionReply;
+  }
+  | {
+    readonly type: 'threads/conversation/bookmark/toggle';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly turnId: string;
   }
   | {
     readonly type: 'threads/action';
@@ -318,6 +325,14 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       isInteractionReply(value.reply)
     );
   }
+  if (value.type === 'threads/conversation/bookmark/toggle') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      isBoundedId(value.turnId)
+    );
+  }
   if (
     value.type !== 'threads/action' ||
     typeof value.action !== 'string' ||
@@ -382,7 +397,19 @@ export function isConversationScreenState(value: unknown): value is Conversation
     value.attachments.length <= 40 &&
     value.attachments.every(isConversationAttachment) &&
     Array.isArray(value.interactions) && value.interactions.every(isConversationInteraction) &&
+    isBookmarkedTurnIds(value.bookmarkedTurnIds, value.model) &&
     (value.notice === undefined || typeof value.notice === 'string')
+  );
+}
+
+function isBookmarkedTurnIds(value: unknown, model: ConversationViewModel): value is readonly string[] {
+  if (!Array.isArray(value) || value.length > model.turns.length) {
+    return false;
+  }
+  const turnIds = new Set(model.turns.map((turn) => turn.id));
+  return (
+    new Set(value).size === value.length &&
+    value.every((turnId) => isBoundedId(turnId) && turnIds.has(turnId))
   );
 }
 

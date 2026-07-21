@@ -688,6 +688,69 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
   assert.match(JSON.stringify(view.webview.postedMessages[1]), /Renamed while open/u);
 });
 
+test('persists turn bookmarks, filters missing turns, and rejects stale bookmark requests', async (t) => {
+  setWorkspace();
+  const bookmarks = new Map<string, string[]>([
+    ['thread-1', ['turn-2', 'turn-missing']]
+  ]);
+  const writes: Array<{ threadId: string; turnId: string; bookmarked: boolean }> = [];
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    turnBookmarkStore: {
+      getBookmarkedTurnIds: (threadId) => bookmarks.get(threadId) ?? [],
+      setBookmarked: async (threadId, turnId, bookmarked) => {
+        writes.push({ threadId, turnId, bookmarked });
+        const current = bookmarks.get(threadId) ?? [];
+        bookmarks.set(
+          threadId,
+          bookmarked
+            ? [turnId, ...current.filter((id) => id !== turnId)]
+            : current.filter((id) => id !== turnId)
+        );
+      }
+    },
+    conversationClient: fakeConversationClient(async (threadId) => createThread({
+      id: threadId,
+      turns: [createTurn({ id: 'turn-1' }), createTurn({ id: 'turn-2' })]
+    })),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+
+  const loaded = view.webview.postedMessages.find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { sessionId: string; bookmarkedTurnIds: string[] } };
+  assert.deepEqual(loaded.state.bookmarkedTurnIds, ['turn-2']);
+
+  view.webview.fire({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-1'
+  });
+  await flushPromises();
+  assert.deepEqual(writes, [{ threadId: 'thread-1', turnId: 'turn-1', bookmarked: true }]);
+  const updated = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationState'
+  ) as { state: { bookmarkedTurnIds: string[] } };
+  assert.deepEqual(updated.state.bookmarkedTurnIds, ['turn-1', 'turn-2']);
+
+  view.webview.fire({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-missing'
+  });
+  await flushPromises();
+  assert.equal(writes.length, 1);
+});
+
 test('sends, streams, and stops only the active sidebar conversation', async (t) => {
   setWorkspace();
   const logs: string[] = [];

@@ -159,6 +159,14 @@ app.addEventListener('click', (event) => {
     removeAttachment(element.dataset.attachmentId);
     return;
   }
+  if (action === 'bookmark-toggle') {
+    toggleTurnBookmark(element.dataset.turnId);
+    return;
+  }
+  if (action === 'bookmark-jump') {
+    jumpToTurn(element.dataset.turnId);
+    return;
+  }
   if (action?.startsWith('interaction-')) {
     submitInteraction(element, action.slice('interaction-'.length));
     return;
@@ -570,6 +578,10 @@ function showConversationShell(
   notice.className = 'notice';
   notice.setAttribute('role', 'status');
   notice.setAttribute('aria-live', 'polite');
+  const bookmarks = document.createElement('nav');
+  bookmarks.className = 'conversation-bookmarks';
+  bookmarks.setAttribute('aria-label', 'Bookmarked turns');
+  bookmarks.hidden = true;
   const content = document.createElement('div');
   content.className = 'conversation-content';
   content.setAttribute('aria-label', 'Conversation transcript');
@@ -681,9 +693,9 @@ function showConversationShell(
   footer.append(status, controls);
   composer.append(tools, attachments, inputLabel, input, error, footer);
 
-  section.append(header, notice, content, interactions, announcer, composer);
+  section.append(header, notice, bookmarks, content, interactions, announcer, composer);
   app.append(section);
-  conversationTarget = { title: titleElement, meta, notice, content };
+  conversationTarget = { title: titleElement, meta, notice, content, bookmarks };
   conversationComposerTarget = {
     container: composer, input, send, stop, status, error, announcer,
     add, addMenu, attachments, settings, settingsSummary, settingsCurrent,
@@ -772,7 +784,10 @@ function renderPendingConversationState(): void {
   const initialRender = !hasRenderedConversation;
   const followLatest = initialRender || isNearConversationBottom();
   const target = requireConversationTarget();
-  renderConversation(target, state.model);
+  renderConversation(target, state.model, {
+    bookmarkedTurnIds: state.bookmarkedTurnIds,
+    enableTurnBookmarks: true
+  });
   if (conversationInteractionsTarget) renderConversationInteractions(conversationInteractionsTarget, state.interactions);
   announceCompletedConversationTurn(state.model, initialRender);
   if (state.notice?.trim()) {
@@ -799,6 +814,42 @@ function renderPendingConversationState(): void {
         composer.input.focus({ preventScroll: true });
       }
     });
+  }
+}
+
+function toggleTurnBookmark(turnId: string | undefined): void {
+  const state = conversationScreenState;
+  const sessionId = conversationSessionId;
+  const threadId = conversationThreadId;
+  if (
+    !turnId || !state || !sessionId || !threadId ||
+    !state.model.turns.some((turn) => turn.id === turnId)
+  ) {
+    return;
+  }
+  vscode.postMessage({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId,
+    threadId,
+    turnId
+  });
+}
+
+function jumpToTurn(turnId: string | undefined): void {
+  if (!turnId || !conversationScreenState?.bookmarkedTurnIds.includes(turnId)) {
+    return;
+  }
+  const section = app.querySelector<HTMLElement>(
+    `.turn[data-turn-id="${cssEscape(turnId)}"]`
+  );
+  if (!section) {
+    return;
+  }
+  section.scrollIntoView({ block: 'start' });
+  section.focus({ preventScroll: true });
+  const heading = section.querySelector<HTMLElement>('.turn-header h2')?.textContent ?? 'Bookmarked turn';
+  if (conversationComposerTarget) {
+    conversationComposerTarget.announcer.textContent = `Moved to ${heading}.`;
   }
 }
 
@@ -1674,6 +1725,7 @@ function actionButton(
   label: string,
   action: ThreadListAction | 'new' | 'open' | 'back' | 'reload' | 'send' | 'stop' | 'add' |
     'add-image' | 'add-mention' | 'add-skill' | 'remove-attachment' |
+    'bookmark-toggle' | 'bookmark-jump' |
     'interaction-accept' | 'interaction-session' | 'interaction-decline' | 'interaction-cancel',
   threadId?: string
 ): HTMLButtonElement {
