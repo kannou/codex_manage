@@ -77,6 +77,7 @@ export interface ConversationScreenState {
   readonly availableAdditions: readonly ConversationAdditionKind[];
   readonly attachments: readonly ConversationAttachmentViewModel[];
   readonly interactions: readonly ConversationInteractionViewModel[];
+  readonly bookmarkedTurnIds: readonly string[];
   readonly notice?: string;
 }
 
@@ -126,6 +127,12 @@ export type ThreadsWebviewToHostMessage =
   | { readonly type: 'threads/open'; readonly threadId: string }
   | { readonly type: 'threads/back' }
   | { readonly type: 'threads/reload' }
+  | {
+    readonly type: 'threads/conversation/bookmark';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly turnId: string;
+  }
   | {
     readonly type: 'threads/conversation/send';
     readonly sessionId: string;
@@ -284,6 +291,10 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       isBoundedId(value.requestId)
     );
   }
+  if (value.type === 'threads/conversation/bookmark') {
+    return hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId']) &&
+      isBoundedId(value.sessionId) && isBoundedId(value.threadId) && isBoundedId(value.turnId);
+  }
   if (value.type === 'threads/conversation/settings') {
     return (
       hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'settings']) &&
@@ -372,6 +383,8 @@ export function isConversationScreenState(value: unknown): value is Conversation
     isConversationViewModel(value.model) &&
     isConversationExecution(value.execution) &&
     isRuntimeSettings(value.runtime) &&
+    Array.isArray(value.bookmarkedTurnIds) &&
+    value.bookmarkedTurnIds.every(isBoundedId) &&
     Array.isArray(value.availableAdditions) &&
     value.availableAdditions.length <= 3 &&
     new Set(value.availableAdditions).size === value.availableAdditions.length &&

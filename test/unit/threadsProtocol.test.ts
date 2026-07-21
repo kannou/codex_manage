@@ -56,7 +56,8 @@ const conversationState = {
     { id: 'attachment-2', kind: 'mention', name: 'AGENTS.md', sizeBytes: 2048 },
     { id: 'attachment-3', kind: 'skill', name: 'review', description: 'Review changes' }
   ],
-  interactions: []
+  interactions: [],
+  bookmarkedTurnIds: ['turn-1']
 } as const;
 
 test('accepts only the explicit sidebar navigation messages', () => {
@@ -73,6 +74,15 @@ test('accepts only the explicit sidebar navigation messages', () => {
   assert.equal(isThreadsWebviewMessage({ type: 'threads/open', threadId: '' }), false);
   assert.equal(isThreadsWebviewMessage({ type: 'threads/new', method: 'thread/start' }), false);
   assert.equal(isThreadsWebviewMessage({ type: 'threads/execute', command: 'anything' }), false);
+});
+
+test('accepts only correlated bounded turn bookmark messages', () => {
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/bookmark', sessionId: 'session-1', threadId: 'thread-1', turnId: 'turn-1'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/bookmark', sessionId: 'session-1', threadId: 'thread-1', turnId: ''
+  }), false);
 });
 
 test('requires thread IDs only for thread-scoped management actions', () => {

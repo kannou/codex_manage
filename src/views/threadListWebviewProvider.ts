@@ -75,6 +75,8 @@ export interface ThreadListWebviewProviderOptions {
   readonly pickMentionFiles?: () => Promise<readonly PickedMentionFile[]>;
   readonly pickSkills?: (cwd: string) => Promise<readonly PickedSkill[]>;
   readonly logger: ThreadListWebviewLogger;
+  readonly getBookmarkedTurnIds?: (threadId: string) => readonly string[];
+  readonly toggleTurnBookmark?: (threadId: string, turnId: string) => Promise<void>;
 }
 
 export interface NewConversationDefaults {
@@ -268,6 +270,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
               message.threadId,
               message.requestId
             );
+            return;
+          case 'threads/conversation/bookmark':
+            void this.toggleTurnBookmark(message.sessionId, message.threadId, message.turnId);
             return;
           case 'threads/conversation/settings':
             this.updateConversationSettings(message.sessionId, message.threadId, message.settings);
@@ -1467,6 +1472,14 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.post({ type: 'threads/conversationState', state: this.toConversationScreenState(sessionId, session.snapshot()) });
   }
 
+  private async toggleTurnBookmark(sessionId: string, threadId: string, turnId: string): Promise<void> {
+    if (sessionId !== this.conversationSessionId || threadId !== this.activeThread?.id) return;
+    const turnExists = this.conversationSession?.snapshot().model.turns.some((turn) => turn.id === turnId);
+    if (!turnExists || !this.options.toggleTurnBookmark) return;
+    await this.options.toggleTurnBookmark(threadId, turnId);
+    this.postCurrentConversationState();
+  }
+
   private postNewConversationState(
     draft: NewConversationDraft,
     execution: ConversationExecutionViewModel,
@@ -1501,6 +1514,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       availableAdditions: this.availableAdditions(draftSupportsImageInput(draft)),
       attachments: draft.attachments.map(toAttachmentViewModel),
       interactions: [],
+      bookmarkedTurnIds: [],
       ...(notice ? { notice } : {})
     };
   }
@@ -1516,7 +1530,8 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       this.availableAdditions(Boolean(
         snapshot.runtime.status === 'ready' && this.conversationSession?.supportsImageInput()
       )),
-      this.conversationAttachments.map(toAttachmentViewModel)
+      this.conversationAttachments.map(toAttachmentViewModel),
+      this.options.getBookmarkedTurnIds?.(snapshot.model.threadId) ?? []
     );
   }
 
@@ -1837,7 +1852,8 @@ function toConversationScreenState(
   interactions: ConversationScreenState['interactions'],
   revision: number,
   availableAdditions: ConversationScreenState['availableAdditions'],
-  attachments: ConversationScreenState['attachments']
+  attachments: ConversationScreenState['attachments'],
+  bookmarkedTurnIds: ConversationScreenState['bookmarkedTurnIds']
 ): ConversationScreenState {
   const execution = toConversationExecution(snapshot);
   return snapshot.notice
@@ -1850,6 +1866,7 @@ function toConversationScreenState(
       availableAdditions,
       attachments,
       interactions,
+      bookmarkedTurnIds,
       notice: snapshot.notice
     }
     : {
@@ -1860,7 +1877,8 @@ function toConversationScreenState(
       runtime: snapshot.runtime,
       availableAdditions,
       attachments,
-      interactions
+      interactions,
+      bookmarkedTurnIds
     };
 }
 

@@ -667,6 +667,27 @@ button.conversation-stop.is-disabled {
   border: 0;
 }
 
+.turn-bookmark {
+  margin-left: auto;
+  padding: 1px 5px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.turn-bookmark.is-bookmarked {
+  color: var(--vscode-charts-yellow, #cca700);
+}
+
+.turn-bookmark:focus-visible {
+  border-color: var(--vscode-focusBorder);
+}
+
+.conversation-bookmarks {
+  min-width: 0;
+  max-width: 130px;
+}
+
 [hidden] {
   display: none !important;
 }

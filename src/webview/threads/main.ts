@@ -77,6 +77,7 @@ let screen: 'list' | 'conversation' = persistedState.screen;
 let conversationTarget: ConversationRenderTarget | undefined;
 let conversationComposerTarget: ConversationComposerTarget | undefined;
 let conversationInteractionsTarget: HTMLElement | undefined;
+let conversationBookmarksTarget: HTMLSelectElement | undefined;
 let conversationThreadId: string | undefined;
 let conversationSessionId: string | undefined;
 let conversationScreenState: ConversationScreenState | undefined;
@@ -564,7 +565,22 @@ function showConversationShell(
   const reload = actionButton('Reload', 'reload');
   reload.className = 'reload-button';
   reload.setAttribute('aria-label', `Reload conversation: ${title}`);
-  header.append(back, heading, reload);
+  const bookmarks = document.createElement('select');
+  bookmarks.className = 'conversation-bookmarks';
+  bookmarks.setAttribute('aria-label', 'Go to bookmarked turn');
+  bookmarks.append(new Option('Bookmarks', ''));
+  bookmarks.addEventListener('change', () => {
+    const turnId = bookmarks.value;
+    bookmarks.value = '';
+    if (!turnId) return;
+    const turn = content.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(turnId)}"]`);
+    if (!turn) return;
+    turn.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    turn.tabIndex = -1;
+    turn.focus({ preventScroll: true });
+    conversationComposerTarget!.announcer.textContent = `Moved to ${turn.querySelector('h2')?.textContent ?? 'bookmarked turn'}.`;
+  });
+  header.append(back, heading, bookmarks, reload);
 
   const notice = document.createElement('div');
   notice.className = 'notice';
@@ -696,6 +712,7 @@ function showConversationShell(
     approvalsReviewer: approvalsReviewer.select
   };
   conversationInteractionsTarget = interactions;
+  conversationBookmarksTarget = bookmarks;
   updateConversationComposer();
   if (focusBack) {
     requestAnimationFrame(() => back.focus({ preventScroll: true }));
@@ -732,6 +749,7 @@ function resetConversationContext(): void {
   conversationTarget = undefined;
   conversationComposerTarget = undefined;
   conversationInteractionsTarget = undefined;
+  conversationBookmarksTarget = undefined;
   conversationThreadId = undefined;
   conversationSessionId = undefined;
   conversationScreenState = undefined;
@@ -772,7 +790,16 @@ function renderPendingConversationState(): void {
   const initialRender = !hasRenderedConversation;
   const followLatest = initialRender || isNearConversationBottom();
   const target = requireConversationTarget();
-  renderConversation(target, state.model);
+  renderConversation(target, state.model, {
+    bookmarkedTurnIds: state.bookmarkedTurnIds,
+    onToggleBookmark: (turnId) => vscode.postMessage({
+      type: 'threads/conversation/bookmark',
+      sessionId: state.sessionId,
+      threadId: state.model.threadId,
+      turnId
+    })
+  });
+  updateConversationBookmarks(state);
   if (conversationInteractionsTarget) renderConversationInteractions(conversationInteractionsTarget, state.interactions);
   announceCompletedConversationTurn(state.model, initialRender);
   if (state.notice?.trim()) {
@@ -800,6 +827,24 @@ function renderPendingConversationState(): void {
       }
     });
   }
+}
+
+function updateConversationBookmarks(state: ConversationScreenState): void {
+  const select = conversationBookmarksTarget;
+  if (!select) return;
+  const turnNumbers = new Map(state.model.turns.map((turn, index) => [turn.id, index + 1]));
+  const options = [new Option(
+    state.bookmarkedTurnIds.length ? `Bookmarks (${state.bookmarkedTurnIds.length})` : 'No bookmarks',
+    ''
+  )];
+  for (const turnId of state.bookmarkedTurnIds) {
+    const number = turnNumbers.get(turnId);
+    const option = new Option(number ? `Turn ${number}` : 'Unavailable turn', turnId);
+    option.disabled = number === undefined;
+    options.push(option);
+  }
+  select.replaceChildren(...options);
+  select.disabled = state.bookmarkedTurnIds.length === 0;
 }
 
 function submitConversation(): void {
