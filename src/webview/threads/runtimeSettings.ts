@@ -25,9 +25,8 @@ export function runtimeSettingsSummary(runtime: ConversationRuntimeSettings | un
   );
   const parts = [model];
   if (effort) parts.push(effort);
-  parts.push(isFastRuntime(runtime) ? 'Fast' : standardSpeedLabel);
-  const permission = runtimePermissionLabel(runtime);
-  if (permission !== 'Ask for approval') parts.push(permission);
+  if (isFastRuntime(runtime)) parts.push('Fast');
+  parts.push(runtimePermissionLabel(runtime));
   return parts.join(' | ');
 }
 
@@ -35,14 +34,13 @@ export function runtimePermissionLabel(
   runtime: Pick<ConversationRuntimeSettings, 'sandbox' | 'approvalPolicy' | 'approvalsReviewer'>
 ): string {
   if (runtime.sandbox === 'workspace-write' && runtime.approvalPolicy === 'on-request') {
-    if (runtime.approvalsReviewer === 'user') return 'Ask for approval';
-    if (runtime.approvalsReviewer === 'auto_review') return 'Approve for me';
+    if (runtime.approvalsReviewer === 'user') return 'Ask';
+    if (runtime.approvalsReviewer === 'auto_review') return 'Auto';
   }
   if (runtime.sandbox === 'danger-full-access' && runtime.approvalPolicy === 'never') {
-    return 'Full access';
+    return 'Full';
   }
-  if (runtime.sandbox === 'read-only') return 'Read only';
-  return 'Custom permissions';
+  return 'Custom';
 }
 
 export function defaultRuntimeLabel(
