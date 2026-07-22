@@ -657,7 +657,13 @@ button.conversation-attachment-remove:focus-visible {
   margin-top: 7px;
   gap: 8px;
   align-items: center;
-  justify-content: space-between;
+}
+
+.conversation-composer-info {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 
 .conversation-composer-status {
@@ -673,6 +679,7 @@ button.conversation-attachment-remove:focus-visible {
   display: flex;
   flex: none;
   gap: 6px;
+  margin-left: auto;
 }
 
 button.conversation-send {
