@@ -90,6 +90,7 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Double-click Send while creating a conversation and confirm only one thread is created; repeat with an App Server failure and confirm the draft text remains available for retry.
 - Start creating a conversation and immediately select **Back**; confirm a late response does not reopen the conversation or overwrite the visible list, and the completed thread appears once after the list updates.
 - Send a multiline text prompt with Ctrl/Cmd+Enter and confirm Enter alone inserts a line break.
+- Confirm Send/Stop stays aligned to the right edge when the composer status is empty, running, stopping, waiting for input, or unavailable; at narrow sidebar widths, status text must wrap without pushing the controls off-screen.
 - Double-click Send and press the shortcut repeatedly while sending; confirm only one turn starts and the draft clears only after acceptance.
 - Confirm the Codex reply grows in place while streaming without collapsing an expanded work card or moving focus unexpectedly.
 - Keep a response streaming for at least 15 minutes and confirm memory remains stable enough for continued navigation, Stop, and Back operations.

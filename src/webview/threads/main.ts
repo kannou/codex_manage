@@ -686,6 +686,8 @@ function showConversationShell(
 
   const footer = document.createElement('div');
   footer.className = 'conversation-composer-footer';
+  const info = document.createElement('div');
+  info.className = 'conversation-composer-info';
   const status = document.createElement('span');
   status.id = 'conversation-composer-status';
   status.className = 'conversation-composer-status';
@@ -701,8 +703,9 @@ function showConversationShell(
   const send = actionButton('Send', 'send');
   send.className = 'conversation-send';
   send.title = 'Send (Ctrl/Cmd+Enter)';
+  info.append(status);
   controls.append(stop, send);
-  footer.append(status, controls);
+  footer.append(info, controls);
   composer.append(tools, attachments, inputLabel, input, error, footer);
 
   section.append(header, notice, content, interactions, announcer, composer);
