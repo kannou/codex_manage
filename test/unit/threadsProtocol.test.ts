@@ -259,6 +259,17 @@ test('validates persisted navigation state and host messages', () => {
 
   assert.equal(isThreadsHostMessage({ type: 'threads/showList' }), true);
   assert.equal(isThreadsHostMessage({
+    type: 'threads/focusConversationPrompt',
+    sessionId: 'session-1',
+    threadId: 'thread-1'
+  }), true);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/focusConversationPrompt',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    command: 'workbench.action.terminal.new'
+  }), false);
+  assert.equal(isThreadsHostMessage({
     type: 'threads/conversationLoading',
     sessionId: 'session-1',
     threadId: 'thread-1',

@@ -1398,3 +1398,42 @@ test('uses an explicit command map and safely restores only known thread state',
   await flushPromises();
   assert.deepEqual(reads, ['thread-1']);
 });
+
+test('tracks the conversation context and posts only a correlated prompt focus message', async (t) => {
+  setWorkspace();
+  const conversationOpen: boolean[] = [];
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
+    onConversationScreenChange: (open) => conversationOpen.push(open),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+
+  assert.equal(provider.focusConversationPrompt(), false);
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  assert.equal(provider.focusConversationPrompt(), false);
+  await flushPromises();
+
+  const loaded = view.webview.postedMessages.find((message) => (
+    (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  )) as { state: { sessionId: string; model: { threadId: string } } } | undefined;
+  assert.ok(loaded);
+  view.webview.postedMessages.length = 0;
+  assert.equal(provider.focusConversationPrompt(), true);
+  assert.deepEqual(view.webview.postedMessages, [{
+    type: 'threads/focusConversationPrompt',
+    sessionId: loaded.state.sessionId,
+    threadId: loaded.state.model.threadId
+  }]);
+
+  view.webview.fire({ type: 'threads/back' });
+  view.webview.postedMessages.length = 0;
+  assert.equal(provider.focusConversationPrompt(), false);
+  assert.deepEqual(view.webview.postedMessages, []);
+  assert.deepEqual(conversationOpen, [true, false]);
+});

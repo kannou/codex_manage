@@ -1,7 +1,7 @@
 # Codex Thread Manager for VS Code 実装計画書
 
 - 作成日: 2026-07-14
-- 状態: vNext Phase D 手動受け入れ確認保留／Phase F 17.1 実装済み・手動確認待ち
+- 状態: vNext Phase D 手動受け入れ確認保留／Phase F 17.3 実装済み・手動確認待ち
 - 仮称: `Codex Thread Manager`
 - 調査環境: Windows / Codex CLI `0.142.3`
 
@@ -996,6 +996,13 @@ Phase E は次の原則で進める。
 - 一覧画面、入力不能状態、別スレッドへの遷移中に、非表示または古い composer へフォーカスしない。
 - コマンド登録、context key、Host-to-Webview メッセージ境界を自動テストし、Windows／Linux／macOS のキー割り当てとユーザーによる再割り当てを手動確認する。
 
+実装結果（2026-07-22）:
+
+- `Codex Thread Manager: Focus Conversation Prompt` コマンドを追加し、Windows／Linux の `Ctrl+Alt+Enter` と macOS の `Cmd+Alt+Enter` を `codexThreadManager.conversationOpen` context key で会話画面だけに限定した。
+- コマンド実行時に Threads View を表示してから、現在の session ID と thread ID に相関付けた固定メッセージを Webview へ送るようにした。
+- Webview 側で現在の会話、composer、入力可能状態を再確認し、読み込み中、一覧、切断中、入力要求中、送信処理中、古い session ではフォーカスを移さないようにした。
+- manifest、コマンド登録、context key の切り替え、Host-to-Webview 境界を自動テストへ追加した。各OSの実キー操作、サイドバー非表示からの復帰、ユーザーによる再割り当ては手動確認待ち。
+
 ### 17.4 `@` ファイル・`$` Skill サジェスト
 
 実装方針:
@@ -1133,7 +1140,7 @@ Phase F は、小さく独立した改善から表示構造と状態管理を固
 | --- | --- | --- | --- |
 | 1 | 実装済み・手動確認待ち | 17.5 composer footer の配置 | CSS と DOM の小さな変更で Send／Stop の位置を先に安定させる。 |
 | 2 | 実装済み・手動確認待ち | 17.1 Reasoning summary | 既存の reasoning item と turn 状態を使う表示改善で、日常の読みやすさへの効果が大きい。 |
-| 3 | 未着手 | 17.3 入力欄フォーカスのショートカット | 既存 textarea のフォーカス処理を再利用でき、他の composer 改善から独立している。 |
+| 3 | 実装済み・手動確認待ち | 17.3 入力欄フォーカスのショートカット | 既存 textarea のフォーカス処理を再利用でき、他の composer 改善から独立している。 |
 | 4 | 未着手 | 17.12 会話画面からのスレッド名変更 | 既存の名前変更処理を再利用でき、会話中の整理操作を完結できる。 |
 | 5 | 未着手 | 17.10 コピー操作 | 小さい操作追加で利用頻度が高く、後続の表示再編前に単独で検証しやすい。 |
 | 6 | 未着手 | 17.7 作業ログ折りたたみ | 完了後の会話構造を整理し、変更ファイル一覧を置く土台を作る。 |

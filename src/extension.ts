@@ -12,6 +12,7 @@ import { ThreadTreeItem } from './views/threadTreeProvider';
 import { ThreadListWebviewProvider } from './views/threadListWebviewProvider';
 
 let activeClient: AppServerClient | undefined;
+const CONVERSATION_OPEN_CONTEXT_KEY = 'codexThreadManager.conversationOpen';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Codex Thread Manager');
@@ -91,6 +92,9 @@ export function activate(context: vscode.ExtensionContext): void {
     onConversationCreated: (thread) => {
       repository?.upsertThread(thread);
       if (repository) provider.setSnapshot(repository.snapshot());
+    },
+    onConversationScreenChange: (open) => {
+      void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, open);
     },
     respondToServerRequest: (id, result) => (activeClient ?? replaceClient()).respondToServerRequest(id, result),
     logger: output
@@ -216,6 +220,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('codexThreadManager.openThread', (threadId?: string) =>
       openThread(threadId, repository, conversationPanels)
     ),
+    vscode.commands.registerCommand('codexThreadManager.focusConversationPrompt', async () => {
+      await vscode.commands.executeCommand('codexThreadManager.threads.focus');
+      provider.focusConversationPrompt();
+    }),
     vscode.commands.registerCommand('codexThreadManager.loadMoreActive', () => loadMoreThreads('active')),
     vscode.commands.registerCommand('codexThreadManager.loadMoreArchive', () => loadMoreThreads('archive')),
     vscode.commands.registerCommand('codexThreadManager.pin', (item?: ThreadTreeItem | string) => pinThread(item, pinStore, repository, provider)),
@@ -226,6 +234,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   output.appendLine('Codex Thread Manager activated.');
+  void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, false);
   void refreshThreads(true);
 }
 

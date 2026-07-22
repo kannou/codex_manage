@@ -300,6 +300,9 @@ function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
         renderList(listState);
       }
       return;
+    case 'threads/focusConversationPrompt':
+      focusConversationPrompt(message.sessionId, message.threadId);
+      return;
     case 'threads/conversationLoading':
       if (
         conversationThreadId !== message.threadId &&
@@ -1558,6 +1561,20 @@ function focusAfterConversationStop(target: ConversationComposerTarget): void {
   if (document.activeElement === document.body) {
     app.querySelector<HTMLButtonElement>('[data-action="back"]')?.focus();
   }
+}
+
+function focusConversationPrompt(sessionId: string, threadId: string): void {
+  const target = conversationComposerTarget;
+  if (
+    !target ||
+    !conversationScreenState ||
+    !isActiveConversation(sessionId, threadId) ||
+    target.input.disabled ||
+    target.input.readOnly
+  ) {
+    return;
+  }
+  target.input.focus({ preventScroll: true });
 }
 
 function conversationStatus(execution: ConversationExecutionViewModel | undefined): string {

@@ -18,6 +18,7 @@ export async function run(): Promise<void> {
     'codexThreadManager.refresh',
     'codexThreadManager.openSettings',
     'codexThreadManager.openThread',
+    'codexThreadManager.focusConversationPrompt',
     'codexThreadManager.loadMoreActive',
     'codexThreadManager.loadMoreArchive',
     'codexThreadManager.pin',
@@ -33,6 +34,7 @@ export async function run(): Promise<void> {
     activationEvents?: string[];
     contributes?: {
       commands?: Array<{ command?: string; icon?: string; title?: string }>;
+      keybindings?: Array<{ command?: string; key?: string; mac?: string; when?: string }>;
       views?: Record<string, Array<{ id?: string; type?: string }>>;
       menus?: {
         'view/title'?: Array<{ command?: string; group?: string; when?: string }>;
@@ -43,6 +45,15 @@ export async function run(): Promise<void> {
   assert.deepEqual(manifest.extensionKind, ['workspace']);
   assert.equal(
     manifest.activationEvents?.includes('onView:codexThreadManager.threads'),
+    true
+  );
+  assert.equal(
+    manifest.contributes?.keybindings?.some((keybinding) =>
+      keybinding.command === 'codexThreadManager.focusConversationPrompt' &&
+      keybinding.key === 'ctrl+alt+enter' &&
+      keybinding.mac === 'cmd+alt+enter' &&
+      keybinding.when === 'codexThreadManager.conversationOpen'
+    ),
     true
   );
   assert.equal(

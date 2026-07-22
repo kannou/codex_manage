@@ -195,6 +195,11 @@ export type ThreadsHostToWebviewMessage =
   }
   | { readonly type: 'threads/showList' }
   | {
+    readonly type: 'threads/focusConversationPrompt';
+    readonly sessionId: string;
+    readonly threadId: string;
+  }
+  | {
     readonly type: 'threads/conversationLoading';
     readonly sessionId: string;
     readonly threadId: string;
@@ -353,6 +358,12 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
   switch (value.type) {
     case 'threads/showList':
       return true;
+    case 'threads/focusConversationPrompt':
+      return (
+        hasOnlyKeys(value, ['type', 'sessionId', 'threadId']) &&
+        isBoundedId(value.sessionId) &&
+        isBoundedId(value.threadId)
+      );
     case 'threads/listState':
       return isObject(value.snapshot) && isObject(value.status) && typeof value.hasWorkspace === 'boolean';
     case 'threads/conversationLoading':

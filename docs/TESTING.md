@@ -90,6 +90,7 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Double-click Send while creating a conversation and confirm only one thread is created; repeat with an App Server failure and confirm the draft text remains available for retry.
 - Start creating a conversation and immediately select **Back**; confirm a late response does not reopen the conversation or overwrite the visible list, and the completed thread appears once after the list updates.
 - Send a multiline text prompt with Ctrl/Cmd+Enter and confirm Enter alone inserts a line break.
+- From the editor and conversation history, use Ctrl+Alt+Enter on Windows/Linux or Cmd+Alt+Enter on macOS and confirm the current conversation prompt receives focus. Repeat with the sidebar hidden, then confirm the shortcut does nothing on the list, while loading, disconnected, waiting for input, or sending.
 - Confirm Send/Stop stays aligned to the right edge when the composer status is empty, running, stopping, waiting for input, or unavailable; at narrow sidebar widths, status text must wrap without pushing the controls off-screen.
 - Double-click Send and press the shortcut repeatedly while sending; confirm only one turn starts and the draft clears only after acceptance.
 - Confirm the Codex reply grows in place while streaming without collapsing an expanded work card or moving focus unexpectedly.
