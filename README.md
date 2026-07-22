@@ -21,9 +21,10 @@ The MVP is packaged for private VSIX installation. Marketplace publication is no
 - Preserves the list position when navigating back and restores the selected conversation by re-reading history after a VS Code window reload.
 - Keeps Pinned and Recent threads expanded by default, keeps Archive collapsed, and remembers each group's visibility.
 - Opens a conversation from the full thread-card body and exposes pin, rename, archive, and restore as inline icon actions.
+- Bookmarks individual turns per workspace and jumps back to them from the sticky conversation header.
 - Reports CLI resolution, runtime/generated protocol versions, and compatibility diagnostics in the `Codex Thread Manager` Output Channel.
 
-Pinning is stored in VS Code `workspaceState`. It is not synchronized with Codex, other workspaces, or other machines.
+Pinning and turn bookmarks are stored in VS Code `workspaceState`. They are not synchronized with Codex, other workspaces, or other machines.
 
 ## Requirements
 
@@ -71,8 +72,9 @@ Reload VS Code after installation.
 10. Use **Add** > **Mention files…** or **Add Skill…** to add file references or enabled Skills to the next message.
 11. Enter a text message and select **Send**, or press Ctrl+Enter / Cmd+Enter. Enter by itself inserts a new line.
 12. While Codex is responding, select **Stop** to interrupt that turn.
-13. Use **Reload** to reconnect and re-synchronize the selected conversation, then **Back** to return to the list.
-14. Open **View: Toggle Output** and select `Codex Thread Manager` for connection diagnostics.
+13. Use the star in a turn header to bookmark it, then select it from the conversation header's **Bookmarks** menu to move back to it.
+14. Use the reload icon to reconnect and re-synchronize the selected conversation, then the back icon to return to the list.
+15. Open **View: Toggle Output** and select `Codex Thread Manager` for connection diagnostics.
 
 Only threads whose `cwd` exactly matches one of the open workspace folder paths are shown. Threads started in a nested subdirectory are not included in this MVP.
 

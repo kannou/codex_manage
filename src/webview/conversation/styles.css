@@ -117,6 +117,17 @@ summary:focus-visible {
   letter-spacing: 0.04em;
 }
 
+.turn-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.turn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 4px;
+}
+
 .turn-meta {
   margin: 5px 0 14px;
   font-size: 0.9rem;

@@ -12,6 +12,11 @@ export interface ConversationRenderTarget {
   readonly content: HTMLElement;
 }
 
+export interface ConversationRenderOptions {
+  readonly bookmarkedTurnIds?: readonly string[];
+  readonly enableTurnBookmarks?: boolean;
+}
+
 let nextTurnHeadingId = 0;
 
 export function renderConversationLoading(
@@ -53,7 +58,8 @@ export function renderConversationError(
 
 export function renderConversation(
   target: ConversationRenderTarget,
-  model: ConversationViewModel
+  model: ConversationViewModel,
+  options: ConversationRenderOptions = {}
 ): void {
   setTextContent(target.title, model.title);
   setTextContent(
@@ -76,12 +82,19 @@ export function renderConversation(
     return;
   }
 
-  reconcileTurns(target.content, model.turns);
+  reconcileTurns(
+    target.content,
+    model.turns,
+    new Set(options.bookmarkedTurnIds ?? []),
+    options.enableTurnBookmarks === true
+  );
 }
 
 function reconcileTurns(
   content: HTMLElement,
-  turns: readonly ConversationTurnViewModel[]
+  turns: readonly ConversationTurnViewModel[],
+  bookmarkedTurnIds: ReadonlySet<string>,
+  enableTurnBookmarks: boolean
 ): void {
   const existing = keyedChildren(content, 'turnId');
   const retained = new Set<HTMLElement>();
@@ -91,7 +104,7 @@ function reconcileTurns(
     if (!section || section.dataset.renderKind !== 'turn') {
       section = createTurn();
     }
-    updateTurn(section, turn, index);
+    updateTurn(section, turn, index, bookmarkedTurnIds.has(turn.id), enableTurnBookmarks);
     placeChild(content, section, index);
     retained.add(section);
   });
@@ -110,7 +123,14 @@ function createTurn(): HTMLElement {
   heading.id = `conversation-turn-heading-${++nextTurnHeadingId}`;
   const status = document.createElement('span');
   status.className = 'status';
-  header.append(heading, status);
+  const controls = document.createElement('div');
+  controls.className = 'turn-header-controls';
+  const bookmark = document.createElement('button');
+  bookmark.type = 'button';
+  bookmark.className = 'turn-bookmark-toggle';
+  bookmark.dataset.action = 'bookmark-toggle';
+  controls.append(status, bookmark);
+  header.append(heading, controls);
 
   const metadata = document.createElement('p');
   metadata.className = 'turn-meta muted';
@@ -118,13 +138,16 @@ function createTurn(): HTMLElement {
   const items = document.createElement('div');
   items.className = 'turn-items';
   section.append(header, metadata, items);
+  section.tabIndex = -1;
   return section;
 }
 
 function updateTurn(
   section: HTMLElement,
   turn: ConversationTurnViewModel,
-  index: number
+  index: number,
+  bookmarked: boolean,
+  enableTurnBookmarks: boolean
 ): void {
   section.dataset.turnId = turn.id;
   const heading = requiredDescendant<HTMLHeadingElement>(section, '.turn-header h2');
@@ -134,6 +157,18 @@ function updateTurn(
   const status = requiredDescendant<HTMLElement>(section, '.turn-header .status');
   setClassName(status, `status status-${statusClass(turn.status)}`);
   setTextContent(status, turn.status);
+
+  const bookmark = requiredDescendant<HTMLButtonElement>(section, '.turn-bookmark-toggle');
+  bookmark.hidden = !enableTurnBookmarks;
+  bookmark.dataset.turnId = turn.id;
+  bookmark.classList.toggle('is-bookmarked', bookmarked);
+  bookmark.setAttribute('aria-pressed', String(bookmarked));
+  bookmark.setAttribute(
+    'aria-label',
+    bookmarked ? `Remove bookmark from Turn ${index + 1}` : `Bookmark Turn ${index + 1}`
+  );
+  bookmark.title = bookmarked ? 'Remove bookmark' : 'Bookmark turn';
+  setTextContent(bookmark, bookmarked ? '★' : '☆');
 
   setTextContent(requiredDescendant<HTMLElement>(section, '.turn-meta'), turnMetadata(turn));
   const items = requiredDescendant<HTMLElement>(section, '.turn-items');
