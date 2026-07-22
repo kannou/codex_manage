@@ -8,6 +8,7 @@ const outputDirectory = await mkdtemp(join(tmpdir(), 'codex-thread-manager-tests
 const entryPoints = [
   'test/unit/codexExecutableResolver.test.mjs',
   'test/unit/dependencyDoctor.test.mjs',
+  'test/unit/extensionManifest.test.mjs',
   'test/unit/jsonlTransport.test.ts',
   'test/unit/markdownRenderer.test.mjs',
   'test/unit/newConversationDefaults.test.ts',

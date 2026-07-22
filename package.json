@@ -64,6 +64,11 @@
         "icon": "$(comment-discussion)"
       },
       {
+        "command": "codexThreadManager.focusConversationPrompt",
+        "title": "Focus Conversation Prompt",
+        "category": "Codex Thread Manager"
+      },
+      {
         "command": "codexThreadManager.pin",
         "title": "Pin Thread",
         "category": "Codex Thread Manager",
@@ -92,6 +97,14 @@
         "title": "Restore Thread",
         "category": "Codex Thread Manager",
         "icon": "$(history)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codexThreadManager.focusConversationPrompt",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+alt+enter",
+        "when": "codexThreadManager.conversationOpen"
       }
     ],
     "menus": {

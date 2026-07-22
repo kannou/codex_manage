@@ -72,6 +72,7 @@ export interface ThreadListWebviewProviderOptions {
   readonly readConversationConfig?: (cwd: string) => Promise<ConversationConfigDefaults>;
   readonly readNewConversationDefaults?: () => NewConversationDefaults;
   readonly onConversationCreated?: (thread: Thread) => void;
+  readonly onConversationScreenChange?: (open: boolean) => void;
   readonly respondToServerRequest?: (id: AppServerRequest['id'], result: unknown) => Promise<boolean>;
   readonly pickLocalImages?: () => Promise<readonly PickedLocalImage[]>;
   readonly pickMentionFiles?: () => Promise<readonly PickedMentionFile[]>;
@@ -196,6 +197,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private conversationViewRevision = 0;
   private conversationAttachments: ConversationAttachment[] = [];
   private readonly pendingBookmarkUpdates = new Set<string>();
+  private conversationScreenOpen = false;
   private disposed = false;
 
   public constructor(private readonly options: ThreadListWebviewProviderOptions) {}
@@ -208,6 +210,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.clearConversationSession();
     this.generation += 1;
     this.activeThread = undefined;
+    this.setConversationScreenOpen(false);
     this.viewReady = false;
     this.disposed = false;
     this.view = view;
@@ -309,6 +312,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         this.generation += 1;
         this.clearConversationSession();
         this.activeThread = undefined;
+        this.setConversationScreenOpen(false);
         this.pendingRestoreThreadId = undefined;
         this.viewReady = false;
         this.view = undefined;
@@ -460,11 +464,28 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.postCurrentConversationState();
   }
 
+  public focusConversationPrompt(): boolean {
+    const sessionId = this.conversationSessionId;
+    const threadId = this.newConversationDraft?.draftId ?? this.activeThread?.id;
+    if (
+      !this.viewReady ||
+      !this.conversationScreenOpen ||
+      !sessionId ||
+      !threadId ||
+      (!this.conversationSession && !this.newConversationDraft)
+    ) {
+      return false;
+    }
+    this.post({ type: 'threads/focusConversationPrompt', sessionId, threadId });
+    return true;
+  }
+
   public resetWorkspace(): void {
     this.generation += 1;
     this.clearConversationSession();
     this.disposeConversationSessions();
     this.activeThread = undefined;
+    this.setConversationScreenOpen(false);
     this.pendingRestoreThreadId = undefined;
     this.interactions.clear();
     this.pendingNewConversations.clear();
@@ -483,6 +504,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.clearConversationSession();
     this.disposeConversationSessions();
     this.activeThread = undefined;
+    this.setConversationScreenOpen(false);
     this.pendingRestoreThreadId = undefined;
     this.interactions.clear();
     this.pendingNewConversations.clear();
@@ -495,6 +517,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.generation += 1;
     this.clearConversationSession();
     this.activeThread = undefined;
+    this.setConversationScreenOpen(false);
     this.pendingRestoreThreadId = undefined;
     this.post({ type: 'threads/showList' });
     this.postListState();
@@ -517,6 +540,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     const sessionId = randomUUID();
     this.conversationSessionId = sessionId;
     this.activeThread = { id: reference.id, title: reference.title };
+    this.setConversationScreenOpen(true);
     this.post({
       type: 'threads/conversationLoading',
       sessionId,
@@ -641,6 +665,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     };
     this.newConversationDraft = draft;
     this.activeThread = undefined;
+    this.setConversationScreenOpen(true);
     this.conversationSessionId = draft.sessionId;
     this.post({
       type: 'threads/newConversationLoaded',
@@ -1591,6 +1616,12 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       status: this.status,
       hasWorkspace: Boolean(vscode.workspace.workspaceFolders?.length)
     });
+  }
+
+  private setConversationScreenOpen(open: boolean): void {
+    if (this.conversationScreenOpen === open) return;
+    this.conversationScreenOpen = open;
+    this.options.onConversationScreenChange?.(open);
   }
 
   private post(message: ThreadsHostToWebviewMessage): void {
