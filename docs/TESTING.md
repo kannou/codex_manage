@@ -75,13 +75,17 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Use Undo immediately after archive.
 - Restore a thread from Archive.
 - Trigger or observe a running/error status change and confirm the icon and label update.
-- Confirm the native **Threads** title contains the only refresh/settings controls and the Webview does not repeat its own title or text buttons.
+- Confirm the native **Threads** title contains the list-level refresh/settings controls and the list screen does not duplicate them.
 - Collapse Pinned or Recent threads, expand Archive, navigate into a conversation and back, then reload the window and confirm the group visibility is restored.
 - Select the title, description, and blank body area of a thread card and confirm each opens the matching conversation without opening an editor tab.
 - Hover and keyboard-focus active cards to reveal Pin/Unpin, Rename, and Archive icons; confirm archived cards show only Restore and touch-style input does not hide the actions.
 - Select each icon and the gaps around the icon strip and confirm none opens a conversation or triggers a neighboring card action.
 - Use **Back** and confirm the loaded list, scroll position, and selected-row focus are restored where possible.
+- Confirm the conversation header shows icon-only Back and Reload controls with accurate tooltips and accessible names; verify **Refresh Threads** updates the list while conversation Reload re-synchronizes only the selected conversation.
 - Open two different threads in sequence and confirm their histories do not mix.
+- Bookmark turns in two different threads and confirm each star's pressed state, thread isolation, and workspace persistence after **Developer: Reload Window**; stored bookmarks for turns missing from loaded history must not appear.
+- Open the compact `★ count` menu with mouse and keyboard, confirm entries follow conversation order and include user-message previews, then select one and confirm the destination turn scrolls into view, receives focus, and is announced without losing bookmark state during streaming updates.
+- Switch between light, dark, high-contrast, and forced-colors themes and confirm the bookmark menu follows VS Code dropdown colors while its focus indicator and the selected stars remain visible.
 - Select **New conversation**, change its Runtime settings, send the first text message, and confirm exactly one new card appears and the sidebar streams the created conversation without an intermediate reload.
 - Double-click Send while creating a conversation and confirm only one thread is created; repeat with an App Server failure and confirm the draft text remains available for retry.
 - Start creating a conversation and immediately select **Back**; confirm a late response does not reopen the conversation or overwrite the visible list, and the completed thread appears once after the list updates.
