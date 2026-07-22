@@ -22,14 +22,14 @@ function runtime(overrides: Partial<ConversationRuntimeSettings> = {}): Conversa
   };
 }
 
-test('summarizes the compact model and effective effort without default or workspace labels', () => {
+test('summarizes the selected runtime values with pipe separators', () => {
   assert.equal(
     runtimeSettingsSummary(runtime()),
-    '5.6 Sol · Low'
+    '5.6 Sol | Low | Standard'
   );
 });
 
-test('shows speed only when Fast is effective and maps full access permission', () => {
+test('shows the selected speed and maps full access permission', () => {
   assert.equal(runtimeSettingsSummary(runtime({
     models: [{ value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', description: 'Frontier' }],
     model: 'gpt-5.6-terra',
@@ -39,23 +39,23 @@ test('shows speed only when Fast is effective and maps full access permission', 
     serviceTier: 'priority',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never'
-  })), '5.6 Terra · High · Fast · Full access');
+  })), '5.6 Terra | High | Fast | Full access');
 
   assert.equal(runtimeSettingsSummary(runtime({
     serviceTiers: [{ value: 'flex', label: 'Flexible', description: 'Lower priority' }],
     serviceTier: 'flex',
     sandbox: 'read-only'
-  })), '5.6 Sol · Low · Read only');
+  })), '5.6 Sol | Low | Flexible | Read only');
 
   assert.equal(runtimeSettingsSummary(runtime({
     defaultServiceTier: 'priority'
-  })), '5.6 Sol · Low · Fast');
+  })), '5.6 Sol | Low | Standard');
 });
 
 test('shows delegated approval without implying broader sandbox access', () => {
   assert.equal(runtimeSettingsSummary(runtime({
     approvalsReviewer: 'auto_review'
-  })), '5.6 Sol · Low · Approve for me');
+  })), '5.6 Sol | Low | Standard | Approve for me');
 });
 
 test('distinguishes unavailable and unlisted runtime values without blank labels', () => {
@@ -69,5 +69,5 @@ test('distinguishes unavailable and unlisted runtime values without blank labels
     serviceTiers: [],
     serviceTier: null,
     defaultServiceTier: null
-  })), 'private-model · Ultra');
+  })), 'private-model | Ultra | Standard');
 });

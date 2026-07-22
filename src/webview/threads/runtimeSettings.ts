@@ -13,10 +13,10 @@ export function runtimeSettingsSummary(runtime: ConversationRuntimeSettings | un
   );
   const parts = [model];
   if (effort) parts.push(effort);
-  if (isFastRuntime(runtime)) parts.push('Fast');
+  parts.push(runtimeSpeedLabel(runtime));
   const permission = runtimePermissionLabel(runtime);
   if (permission !== 'Ask for approval') parts.push(permission);
-  return parts.join(' · ');
+  return parts.join(' | ');
 }
 
 export function compactModelLabel(label: string): string {
@@ -68,11 +68,13 @@ function effectiveRuntimeLabel(
   return stripRuntimeMetadata(runtimeOptionLabel(options, value) ?? runtimeValueLabel(value));
 }
 
-function isFastRuntime(runtime: ConversationRuntimeSettings): boolean {
-  const value = runtime.serviceTier ?? runtime.defaultServiceTier;
-  if (!value) return false;
+function runtimeSpeedLabel(runtime: ConversationRuntimeSettings): string {
+  const value = runtime.serviceTier;
+  if (!value) return 'Standard';
   const label = stripRuntimeMetadata(runtimeOptionLabel(runtime.serviceTiers, value) ?? value);
-  return value.toLowerCase() === 'fast' || value.toLowerCase() === 'priority' || label.toLowerCase() === 'fast';
+  return value.toLowerCase() === 'fast' || value.toLowerCase() === 'priority' || label.toLowerCase() === 'fast'
+    ? 'Fast'
+    : label;
 }
 
 function stripRuntimeMetadata(label: string): string {

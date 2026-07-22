@@ -1252,7 +1252,7 @@ function renderRuntimeSettings(target: ConversationComposerTarget): void {
     runtime?.serviceTiers ?? [],
     runtime?.serviceTier,
     true,
-    defaultRuntimeLabel('Default speed', runtime?.defaultServiceTier, runtime?.serviceTiers ?? [])
+    'Standard'
   );
   const permissionPreset = runtimePermissionPreset(runtime);
   const permissionOptions = [
