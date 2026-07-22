@@ -21,6 +21,10 @@ function agentMessage(id: string, text: string): ThreadItem {
   };
 }
 
+function reasoning(id: string, summary: readonly string[]): ThreadItem {
+  return { type: 'reasoning', id, summary: [...summary], content: [] };
+}
+
 function notification(value: ConversationNotification): ConversationNotification {
   return value;
 }
@@ -128,6 +132,95 @@ test('preserves live items until a partial turn completion can be authoritativel
   if (item?.type === 'agentMessage') {
     assert.equal(item.text, 'Visible before completion');
   }
+});
+
+test('streams reasoning summary parts by turn and item ID', () => {
+  let state = createConversationReducerState(createThread({ turns: [] }));
+  state = reduceConversationNotification(state, notification({
+    method: 'item/reasoning/summaryPartAdded',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-reasoning',
+      itemId: 'reasoning-live',
+      summaryIndex: 0
+    }
+  }));
+  state = reduceConversationNotification(state, notification({
+    method: 'item/reasoning/summaryTextDelta',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-reasoning',
+      itemId: 'reasoning-live',
+      summaryIndex: 0,
+      delta: 'Checking'
+    }
+  }));
+  state = reduceConversationNotification(state, notification({
+    method: 'item/reasoning/summaryTextDelta',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-reasoning',
+      itemId: 'reasoning-live',
+      summaryIndex: 0,
+      delta: ' tests.'
+    }
+  }));
+
+  const item = state.thread.turns[0]?.items[0];
+  assert.equal(item?.type, 'reasoning');
+  if (item?.type === 'reasoning') {
+    assert.deepEqual(item.summary, ['Checking tests.']);
+  }
+
+  const collision = reduceConversationNotification(state, notification({
+    method: 'item/reasoning/summaryTextDelta',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'another-turn',
+      itemId: 'reasoning-live',
+      summaryIndex: 0,
+      delta: 'must not mix'
+    }
+  }));
+  assert.equal(collision.needsResync, true);
+  assert.deepEqual(collision.thread, state.thread);
+});
+
+test('drops provisional reasoning when authoritative completed history omits it', () => {
+  let state = createConversationReducerState(createThread({ turns: [] }));
+  state = reduceConversationNotification(state, notification({
+    method: 'item/reasoning/summaryTextDelta',
+    params: {
+      threadId: 'thread-1',
+      turnId: 'turn-partial-reasoning',
+      itemId: 'reasoning-provisional',
+      summaryIndex: 0,
+      delta: 'Temporary summary'
+    }
+  }));
+  state = reduceConversationNotification(state, notification({
+    method: 'turn/completed',
+    params: {
+      threadId: 'thread-1',
+      turn: createTurn({
+        id: 'turn-partial-reasoning',
+        items: [],
+        itemsView: 'summary'
+      })
+    }
+  }));
+  assert.deepEqual(state.thread.turns[0]?.items, [
+    reasoning('reasoning-provisional', ['Temporary summary'])
+  ]);
+
+  state = hydrateConversationReducer(state, createThread({
+    turns: [createTurn({
+      id: 'turn-partial-reasoning',
+      items: [agentMessage('agent-final', 'Done')],
+      itemsView: 'full'
+    })]
+  }));
+  assert.deepEqual(state.thread.turns[0]?.items, [agentMessage('agent-final', 'Done')]);
 });
 
 test('does not downgrade a full terminal turn when a stale partial completion arrives', () => {

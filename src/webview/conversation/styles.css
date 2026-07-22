@@ -218,12 +218,20 @@ details.activity-card {
   padding: 0;
 }
 
+details.activity-card-inline {
+  padding: 9px 11px;
+}
+
 .activity-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 9px 11px;
+}
+
+.activity-summary[hidden] {
+  display: none;
 }
 
 details .activity-summary {
@@ -242,6 +250,15 @@ details .activity-summary {
   border-top: 1px solid var(--vscode-widget-border);
   color: var(--vscode-descriptionForeground);
   background: var(--vscode-textCodeBlock-background);
+}
+
+.activity-card-inline .activity-detail {
+  max-height: none;
+  padding: 0;
+  border-top: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: transparent;
 }
 
 .status {

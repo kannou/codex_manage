@@ -40,6 +40,7 @@ export type ConversationItemViewModel =
     readonly title: string;
     readonly status: string | null;
     readonly detail: string | null;
+    readonly detailPresentation: 'inline' | 'collapsible';
   };
 
 export function toConversationViewModel(thread: Thread): ConversationViewModel {
@@ -63,11 +64,16 @@ function toTurnViewModel(turn: Turn): ConversationTurnViewModel {
     completedAt: toMilliseconds(turn.completedAt),
     durationMs: turn.durationMs,
     errorMessage: turn.error?.message ?? null,
-    items: turn.items.map(toItemViewModel)
+    items: turn.items
+      .map((item) => toItemViewModel(item, turn.status))
+      .filter((item): item is ConversationItemViewModel => item !== null)
   };
 }
 
-function toItemViewModel(item: ThreadItem): ConversationItemViewModel {
+function toItemViewModel(
+  item: ThreadItem,
+  turnStatus: Turn['status']
+): ConversationItemViewModel | null {
   switch (item.type) {
     case 'userMessage':
       return {
@@ -85,14 +91,20 @@ function toItemViewModel(item: ThreadItem): ConversationItemViewModel {
       };
     case 'plan':
       return activity(item.id, 'plan', 'Plan', null, item.text);
-    case 'reasoning':
+    case 'reasoning': {
+      const detail = item.summary.join('\n\n');
+      if (!detail.trim()) {
+        return null;
+      }
       return activity(
         item.id,
         'reasoning',
         'Reasoning summary',
         null,
-        item.summary.join('\n\n') || null
+        detail,
+        turnStatus === 'inProgress' ? 'inline' : 'collapsible'
       );
+    }
     case 'commandExecution':
       return activity(
         item.id,
@@ -244,7 +256,8 @@ function activity(
   activityKind: string,
   title: string,
   status: string | null,
-  detail: string | null
+  detail: string | null,
+  detailPresentation: 'inline' | 'collapsible' = 'collapsible'
 ): ConversationItemViewModel {
   return {
     kind: 'activity',
@@ -252,7 +265,8 @@ function activity(
     activityKind,
     title,
     status,
-    detail: truncate(detail)
+    detail: truncate(detail),
+    detailPresentation
   };
 }
 
