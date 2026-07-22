@@ -24,6 +24,8 @@ type ConversationNotificationMethod =
   | 'item/started'
   | 'item/completed'
   | 'item/agentMessage/delta'
+  | 'item/reasoning/summaryPartAdded'
+  | 'item/reasoning/summaryTextDelta'
   | 'thread/status/changed';
 
 export type ConversationNotification = Extract<
@@ -288,6 +290,21 @@ export function parseConversationNotification(
         typeof params.turnId !== 'string' ||
         typeof params.itemId !== 'string' ||
         typeof params.delta !== 'string'
+      ) {
+        throw invalidConversationNotification(method);
+      }
+      break;
+    case 'item/reasoning/summaryPartAdded':
+    case 'item/reasoning/summaryTextDelta':
+      if (
+        !isJsonObject(params) ||
+        typeof params.threadId !== 'string' ||
+        typeof params.turnId !== 'string' ||
+        typeof params.itemId !== 'string' ||
+        typeof params.summaryIndex !== 'number' ||
+        !Number.isSafeInteger(params.summaryIndex) ||
+        params.summaryIndex < 0 ||
+        (method === 'item/reasoning/summaryTextDelta' && typeof params.delta !== 'string')
       ) {
         throw invalidConversationNotification(method);
       }

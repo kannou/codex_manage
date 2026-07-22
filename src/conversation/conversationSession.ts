@@ -529,6 +529,8 @@ export class ConversationSession {
       case 'item/started':
       case 'item/completed':
       case 'item/agentMessage/delta':
+      case 'item/reasoning/summaryPartAdded':
+      case 'item/reasoning/summaryTextDelta':
         break;
     }
 

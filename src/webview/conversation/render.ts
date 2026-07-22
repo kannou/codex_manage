@@ -260,8 +260,23 @@ function updateItem(element: HTMLElement, item: ConversationItemViewModel): void
   }
 
   delete element.dataset.itemRole;
-  setClassName(element, 'activity-card');
+  setClassName(
+    element,
+    item.detailPresentation === 'inline'
+      ? 'activity-card activity-card-inline'
+      : 'activity-card'
+  );
+  const previousPresentation = element.dataset.detailPresentation;
+  element.dataset.detailPresentation = item.detailPresentation;
   const summary = requiredDescendant<HTMLElement>(element, '.activity-summary');
+  summary.hidden = item.detailPresentation === 'inline';
+  if (element instanceof HTMLDetailsElement) {
+    if (item.detailPresentation === 'inline') {
+      element.open = true;
+    } else if (previousPresentation === 'inline') {
+      element.open = false;
+    }
+  }
   let title = directChildWithClass(summary, 'activity-title');
   if (!title) {
     title = document.createElement('span');

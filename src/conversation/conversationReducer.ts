@@ -98,6 +98,22 @@ export function reduceConversationNotification(
         notification.params.itemId,
         notification.params.delta
       );
+    case 'item/reasoning/summaryPartAdded':
+      return reduceReasoningSummaryUpdate(
+        state,
+        notification.params.turnId,
+        notification.params.itemId,
+        notification.params.summaryIndex,
+        null
+      );
+    case 'item/reasoning/summaryTextDelta':
+      return reduceReasoningSummaryUpdate(
+        state,
+        notification.params.turnId,
+        notification.params.itemId,
+        notification.params.summaryIndex,
+        notification.params.delta
+      );
     case 'thread/status/changed': {
       const thread = { ...state.thread, status: notification.params.status };
       const inconsistent = notification.params.status.type !== 'active' &&
@@ -281,6 +297,52 @@ function reduceAgentMessageDelta(
   };
 }
 
+function reduceReasoningSummaryUpdate(
+  state: ConversationReducerState,
+  turnId: string,
+  itemId: string,
+  summaryIndex: number,
+  delta: string | null
+): ConversationReducerState {
+  const owner = state.items.get(itemId);
+  if (owner && owner.turnId !== turnId) {
+    return markNeedsResync(state);
+  }
+
+  const turn = findTurn(state.thread, turnId);
+  if (turn && (isTerminalTurn(turn) || owner?.lifecycle === 'completed')) {
+    return state;
+  }
+
+  const target = turn ?? placeholderTurn(turnId);
+  const current = target.items.find((item) => item.id === itemId);
+  if (current && current.type !== 'reasoning') {
+    return markNeedsResync(state);
+  }
+
+  const summary = current?.type === 'reasoning' ? [...current.summary] : [];
+  if (summaryIndex > summary.length) {
+    return markNeedsResync(state);
+  }
+  if (summaryIndex === summary.length) {
+    summary.push('');
+  }
+  if (delta !== null) {
+    summary[summaryIndex] = `${summary[summaryIndex] ?? ''}${delta}`;
+  }
+
+  const reasoning: ThreadItem = current?.type === 'reasoning'
+    ? { ...current, summary }
+    : { type: 'reasoning', id: itemId, summary, content: [] };
+  const items = new Map(state.items);
+  items.set(itemId, { turnId, lifecycle: 'started' });
+  return {
+    thread: upsertTurn(state.thread, upsertItem(target, reasoning)),
+    items,
+    needsResync: state.needsResync
+  };
+}
+
 function mergeStartedTurn(existing: Turn, incoming: Turn): Turn {
   const incomingById = new Map(incoming.items.map((item) => [item.id, item]));
   const existingById = new Map(existing.items.map((item) => [item.id, item]));
@@ -313,6 +375,18 @@ function mergeStartedItem(current: ThreadItem, incoming: ThreadItem): ThreadItem
       return incoming;
     }
     return current;
+  }
+  if (current.type === 'reasoning' && incoming.type === 'reasoning') {
+    const length = Math.max(current.summary.length, incoming.summary.length);
+    const summary = Array.from({ length }, (_, index) => {
+      const currentPart = current.summary[index] ?? '';
+      const incomingPart = incoming.summary[index] ?? '';
+      if (currentPart.startsWith(incomingPart)) {
+        return currentPart;
+      }
+      return incomingPart.startsWith(currentPart) ? incomingPart : currentPart;
+    });
+    return { ...incoming, summary };
   }
   return current;
 }

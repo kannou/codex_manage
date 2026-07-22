@@ -155,7 +155,54 @@ test('falls back to a generic card for a future unknown item variant', () => {
     activityKind: 'unknown',
     title: 'Unsupported work item: futureWorkItem',
     status: null,
-    detail: null
+    detail: null,
+    detailPresentation: 'collapsible'
   });
   assert.equal(JSON.stringify(model).includes('do not expose'), false);
+});
+
+test('shows reasoning directly while running and as a collapsible detail after completion', () => {
+  const reasoning: ThreadItem = {
+    type: 'reasoning',
+    id: 'reasoning-live',
+    summary: ['Inspecting the reducer.', 'Checking the renderer.'],
+    content: [hiddenValues.reasoning]
+  };
+  const running = toConversationViewModel(createThread({
+    status: { type: 'active', activeFlags: [] },
+    turns: [createTurn({
+      status: 'inProgress',
+      completedAt: null,
+      durationMs: null,
+      items: [reasoning]
+    })]
+  }));
+  const completed = toConversationViewModel(createThread({
+    turns: [createTurn({ items: [reasoning] })]
+  }));
+
+  const runningItem = running.turns[0]?.items[0];
+  const completedItem = completed.turns[0]?.items[0];
+  assert.equal(runningItem?.kind, 'activity');
+  assert.equal(completedItem?.kind, 'activity');
+  if (runningItem?.kind === 'activity' && completedItem?.kind === 'activity') {
+    assert.equal(runningItem.detail, 'Inspecting the reducer.\n\nChecking the renderer.');
+    assert.equal(runningItem.detailPresentation, 'inline');
+    assert.equal(completedItem.detailPresentation, 'collapsible');
+  }
+});
+
+test('does not render an empty reasoning summary card', () => {
+  const model = toConversationViewModel(createThread({
+    turns: [createTurn({
+      items: [{
+        type: 'reasoning',
+        id: 'reasoning-empty',
+        summary: ['', '  '],
+        content: [hiddenValues.reasoning]
+      }]
+    })]
+  }));
+
+  assert.deepEqual(model.turns[0]?.items, []);
 });

@@ -232,6 +232,16 @@ test('parses the conversation error notification and ignores unrelated notificat
 
 test('rejects malformed params for recognized conversation notifications', () => {
   assert.throws(
+    () => parseConversationNotification('item/reasoning/summaryTextDelta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'reasoning-1',
+      summaryIndex: -1,
+      delta: 'unsafe index'
+    }),
+    /invalid item\/reasoning\/summaryTextDelta notification params/u
+  );
+  assert.throws(
     () => parseConversationNotification('item/started', {
       threadId: 'thread-1',
       turnId: 'turn-1',
@@ -266,4 +276,23 @@ test('rejects malformed params for recognized conversation notifications', () =>
     }),
     /invalid error notification params/u
   );
+});
+
+test('parses reasoning summary streaming notifications', () => {
+  const part = parseConversationNotification('item/reasoning/summaryPartAdded', {
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    itemId: 'reasoning-1',
+    summaryIndex: 0
+  });
+  const delta = parseConversationNotification('item/reasoning/summaryTextDelta', {
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    itemId: 'reasoning-1',
+    summaryIndex: 0,
+    delta: 'Checked the implementation.'
+  });
+
+  assert.equal(part?.method, 'item/reasoning/summaryPartAdded');
+  assert.equal(delta?.method, 'item/reasoning/summaryTextDelta');
 });
