@@ -7,6 +7,7 @@ import {
   ConversationPanelManager
 } from './conversation/conversationPanelManager';
 import { PinStore } from './state/pinStore';
+import { TurnBookmarkStore } from './state/turnBookmarkStore';
 import { ThreadTreeItem } from './views/threadTreeProvider';
 import { ThreadListWebviewProvider } from './views/threadListWebviewProvider';
 
@@ -15,6 +16,7 @@ let activeClient: AppServerClient | undefined;
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Codex Thread Manager');
   const pinStore = new PinStore(context.workspaceState);
+  const turnBookmarkStore = new TurnBookmarkStore(context.workspaceState);
   let probeGeneration = 0;
   let repository: ThreadRepository | undefined;
 
@@ -68,6 +70,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const provider = new ThreadListWebviewProvider({
     extensionUri: context.extensionUri,
+    turnBookmarkStore,
     conversationClient: {
       readThread: (params) => (activeClient ?? replaceClient()).readThread(params),
       resumeThread: (params) => (activeClient ?? replaceClient()).resumeThread(params),

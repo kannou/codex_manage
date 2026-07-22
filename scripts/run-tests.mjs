@@ -26,6 +26,7 @@ const entryPoints = [
   'test/unit/threadListWebviewProvider.test.ts',
   'test/unit/threadTreeProvider.test.ts',
   'test/unit/threadsProtocol.test.ts',
+  'test/unit/turnBookmarkStore.test.ts',
   'test/integration/appServerCompatibility.test.ts',
   'test/integration/appServerConversation.test.ts',
   'test/integration/appServerOperations.test.ts',

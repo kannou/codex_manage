@@ -27,6 +27,21 @@ button {
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border));
 }
 
+button.conversation-header-action {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: 0 0 24px;
+  place-items: center;
+  color: var(--vscode-foreground);
+  background: transparent;
+}
+
+button.conversation-header-action:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
 button:not(.thread-open) {
   padding: 3px 7px;
   color: var(--vscode-button-secondaryForeground);
@@ -280,8 +295,46 @@ button.thread-action:hover {
   white-space: nowrap;
 }
 
+.conversation-bookmarks {
+  min-width: 0;
+  width: 56px;
+  height: 24px;
+  padding: 2px 4px;
+  flex: 0 0 56px;
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+  background: var(--vscode-dropdown-background, var(--vscode-sideBar-background));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border));
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.conversation-bookmarks:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
 .conversation-view .notice {
   margin: 12px 0;
+}
+
+button.turn-bookmark-toggle {
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  color: var(--vscode-descriptionForeground);
+  line-height: 23px;
+  background: transparent;
+  border-color: transparent;
+}
+
+button.turn-bookmark-toggle.is-bookmarked {
+  color: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground));
+}
+
+button.turn-bookmark-toggle:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
 }
 
 .conversation-interactions {

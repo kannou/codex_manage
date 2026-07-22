@@ -36,7 +36,7 @@ interface VsCodeApi<T> {
 }
 
 type ThreadCardAction = 'open' | 'pin' | 'unpin' | 'rename' | 'archive' | 'unarchive';
-type ThreadActionIcon = 'pin' | 'unpin' | 'rename' | 'archive' | 'restore';
+type ActionIcon = 'back' | 'reload' | 'pin' | 'unpin' | 'rename' | 'archive' | 'restore';
 
 interface ThreadCardFocus {
   readonly threadId: string;
@@ -82,6 +82,7 @@ let screen: 'list' | 'conversation' = persistedState.screen;
 let conversationTarget: ConversationRenderTarget | undefined;
 let conversationComposerTarget: ConversationComposerTarget | undefined;
 let conversationInteractionsTarget: HTMLElement | undefined;
+let conversationBookmarksTarget: HTMLSelectElement | undefined;
 let conversationThreadId: string | undefined;
 let conversationSessionId: string | undefined;
 let conversationScreenState: ConversationScreenState | undefined;
@@ -162,6 +163,10 @@ app.addEventListener('click', (event) => {
   }
   if (action === 'remove-attachment') {
     removeAttachment(element.dataset.attachmentId);
+    return;
+  }
+  if (action === 'bookmark-toggle') {
+    toggleTurnBookmark(element.dataset.turnId);
     return;
   }
   if (action?.startsWith('interaction-')) {
@@ -532,10 +537,9 @@ function showConversationShell(
 
   if (conversationTarget && conversationThreadId === threadId) {
     conversationTarget.title.textContent = title;
-    app.querySelector<HTMLButtonElement>('[data-action="reload"]')?.setAttribute(
-      'aria-label',
-      `Reload conversation: ${title}`
-    );
+    const reload = app.querySelector<HTMLButtonElement>('[data-action="reload"]');
+    reload?.setAttribute('aria-label', `Reload conversation: ${title}`);
+    if (reload) reload.title = `Reload conversation: ${title}`;
     if (sessionId && sessionId !== conversationSessionId) {
       beginConversationSession(sessionId);
     }
@@ -556,9 +560,11 @@ function showConversationShell(
   section.className = 'conversation-view';
   const header = document.createElement('header');
   header.className = 'conversation-header';
-  const back = actionButton('Back', 'back');
-  back.className = 'back-button';
+  const back = actionButton('', 'back');
+  back.className = 'conversation-header-action back-button';
   back.setAttribute('aria-label', 'Back to thread list');
+  back.title = 'Back to thread list';
+  back.append(actionIcon('back'));
   const heading = document.createElement('div');
   heading.className = 'conversation-heading';
   const titleElement = document.createElement('h1');
@@ -566,10 +572,23 @@ function showConversationShell(
   const meta = document.createElement('p');
   meta.className = 'muted conversation-meta';
   heading.append(titleElement, meta);
-  const reload = actionButton('Reload', 'reload');
-  reload.className = 'reload-button';
+  const bookmarks = document.createElement('select');
+  bookmarks.className = 'conversation-bookmarks';
+  bookmarks.setAttribute('aria-label', 'Go to bookmarked turn');
+  bookmarks.append(new Option('No bookmarks', ''));
+  bookmarks.hidden = true;
+  bookmarks.disabled = true;
+  bookmarks.addEventListener('change', () => {
+    const turnId = bookmarks.value;
+    bookmarks.value = '';
+    jumpToTurn(turnId);
+  });
+  const reload = actionButton('', 'reload');
+  reload.className = 'conversation-header-action reload-button';
   reload.setAttribute('aria-label', `Reload conversation: ${title}`);
-  header.append(back, heading, reload);
+  reload.title = `Reload conversation: ${title}`;
+  reload.append(actionIcon('reload'));
+  header.append(back, heading, bookmarks, reload);
 
   const notice = document.createElement('div');
   notice.className = 'notice';
@@ -701,6 +720,7 @@ function showConversationShell(
     approvalsReviewer: approvalsReviewer.select
   };
   conversationInteractionsTarget = interactions;
+  conversationBookmarksTarget = bookmarks;
   updateConversationComposer();
   if (focusBack) {
     requestAnimationFrame(() => back.focus({ preventScroll: true }));
@@ -737,6 +757,7 @@ function resetConversationContext(): void {
   conversationTarget = undefined;
   conversationComposerTarget = undefined;
   conversationInteractionsTarget = undefined;
+  conversationBookmarksTarget = undefined;
   conversationThreadId = undefined;
   conversationSessionId = undefined;
   conversationScreenState = undefined;
@@ -777,7 +798,11 @@ function renderPendingConversationState(): void {
   const initialRender = !hasRenderedConversation;
   const followLatest = initialRender || isNearConversationBottom();
   const target = requireConversationTarget();
-  renderConversation(target, state.model);
+  renderConversation(target, state.model, {
+    bookmarkedTurnIds: state.bookmarkedTurnIds,
+    enableTurnBookmarks: true
+  });
+  updateConversationBookmarks(state);
   if (conversationInteractionsTarget) renderConversationInteractions(conversationInteractionsTarget, state.interactions);
   announceCompletedConversationTurn(state.model, initialRender);
   if (state.notice?.trim()) {
@@ -785,10 +810,9 @@ function renderPendingConversationState(): void {
     target.notice.className = 'notice';
     target.notice.textContent = state.notice;
   }
-  app.querySelector<HTMLButtonElement>('[data-action="reload"]')?.setAttribute(
-    'aria-label',
-    `Reload conversation: ${state.model.title}`
-  );
+  const reload = app.querySelector<HTMLButtonElement>('[data-action="reload"]');
+  reload?.setAttribute('aria-label', `Reload conversation: ${state.model.title}`);
+  if (reload) reload.title = `Reload conversation: ${state.model.title}`;
   hasRenderedConversation = true;
   if (followLatest) {
     window.scrollTo({ top: document.documentElement.scrollHeight });
@@ -804,6 +828,58 @@ function renderPendingConversationState(): void {
         composer.input.focus({ preventScroll: true });
       }
     });
+  }
+}
+
+function updateConversationBookmarks(state: ConversationScreenState): void {
+  const select = conversationBookmarksTarget;
+  if (!select) return;
+  const bookmarked = new Set(state.bookmarkedTurnIds);
+  const entries = state.model.turns
+    .map((turn, index) => ({ turn, index }))
+    .filter(({ turn }) => bookmarked.has(turn.id));
+  const options = [new Option(
+    entries.length ? `★ ${entries.length}` : 'No bookmarks',
+    ''
+  )];
+  for (const { turn, index } of entries) {
+    const preview = turn.items.find(
+      (item) => item.kind === 'message' && item.role === 'user' && item.text.trim()
+    );
+    const text = preview?.kind === 'message'
+      ? preview.text.trim().replace(/\s+/gu, ' ').slice(0, 48)
+      : '';
+    options.push(new Option(`Turn ${index + 1}${text ? ` · ${text}` : ''}`, turn.id));
+  }
+  select.replaceChildren(...options);
+  select.title = entries.length ? `${entries.length} bookmarked turns` : '';
+  select.hidden = entries.length === 0;
+  select.disabled = entries.length === 0;
+}
+
+function toggleTurnBookmark(turnId: string | undefined): void {
+  const state = conversationScreenState;
+  if (
+    !turnId || !state || !conversationSessionId || !conversationThreadId ||
+    !state.model.turns.some((turn) => turn.id === turnId)
+  ) return;
+  vscode.postMessage({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId: conversationSessionId,
+    threadId: conversationThreadId,
+    turnId
+  });
+}
+
+function jumpToTurn(turnId: string | undefined): void {
+  if (!turnId || !conversationScreenState?.bookmarkedTurnIds.includes(turnId)) return;
+  const turn = app.querySelector<HTMLElement>(`.turn[data-turn-id="${cssEscape(turnId)}"]`);
+  if (!turn) return;
+  turn.scrollIntoView({ block: 'start' });
+  turn.focus({ preventScroll: true });
+  const heading = turn.querySelector<HTMLElement>('.turn-header h2')?.textContent ?? 'bookmarked turn';
+  if (conversationComposerTarget) {
+    conversationComposerTarget.announcer.textContent = `Moved to ${heading}.`;
   }
 }
 
@@ -1675,6 +1751,7 @@ function actionButton(
   label: string,
   action: ThreadListAction | 'new' | 'open' | 'back' | 'reload' | 'send' | 'stop' | 'add' |
     'add-image' | 'add-mention' | 'add-skill' | 'remove-attachment' |
+    'bookmark-toggle' |
     'interaction-accept' | 'interaction-session' | 'interaction-decline' | 'interaction-cancel',
   threadId?: string
 ): HTMLButtonElement {
@@ -1691,18 +1768,18 @@ function actionButton(
 function threadActionButton(
   label: string,
   action: Exclude<ThreadCardAction, 'open'>,
-  icon: ThreadActionIcon,
+  icon: ActionIcon,
   thread: ThreadListItemViewModel
 ): HTMLButtonElement {
   const result = actionButton('', action, thread.id);
   result.className = 'thread-action';
   result.setAttribute('aria-label', `${label} ${thread.title}`);
   result.title = `${label} ${thread.title}`;
-  result.append(threadActionIcon(icon));
+  result.append(actionIcon(icon));
   return result;
 }
 
-function threadActionIcon(icon: ThreadActionIcon): SVGSVGElement {
+function actionIcon(icon: ActionIcon): SVGSVGElement {
   const namespace = 'http://www.w3.org/2000/svg';
   const result = document.createElementNS(namespace, 'svg');
   result.classList.add('thread-action-icon');
@@ -1715,12 +1792,14 @@ function threadActionIcon(icon: ThreadActionIcon): SVGSVGElement {
   result.setAttribute('aria-hidden', 'true');
   result.setAttribute('focusable', 'false');
   const path = document.createElementNS(namespace, 'path');
-  path.setAttribute('d', THREAD_ACTION_ICON_PATHS[icon]);
+  path.setAttribute('d', ACTION_ICON_PATHS[icon]);
   result.append(path);
   return result;
 }
 
-const THREAD_ACTION_ICON_PATHS: Readonly<Record<ThreadActionIcon, string>> = {
+const ACTION_ICON_PATHS: Readonly<Record<ActionIcon, string>> = {
+  back: 'M7 3 2 8l5 5M2 8h12',
+  reload: 'M13 5.5V2.8M13 5.5h-2.7M13 5.5a5.5 5.5 0 1 0-.3 5.7',
   pin: 'M6 2.5h4l.5 4 2 2.5h-9l2-2.5.5-4M8 9v4.5',
   unpin: 'M6 2.5h4l.5 4 2 2.5h-9l2-2.5.5-4M8 9v4.5M2.5 2.5l11 11',
   rename: 'M3 12.5l.5-2L11 3l2 2-7.5 7.5-2 .5ZM9.8 4.2l2 2',
