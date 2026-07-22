@@ -1257,7 +1257,7 @@ function renderRuntimeSettings(target: ConversationComposerTarget): void {
     runtime?.serviceTiers ?? [],
     runtime?.serviceTier,
     true,
-    defaultRuntimeLabel(standardSpeedLabel, runtime?.defaultServiceTier, runtime?.serviceTiers ?? [])
+    standardSpeedLabel
   );
   const permissionPreset = runtimePermissionPreset(runtime);
   const permissionOptions = [...conversationPermissionOptions];

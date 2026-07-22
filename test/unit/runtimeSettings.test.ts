@@ -35,14 +35,14 @@ test('matches the new-conversation permission and speed wording from extension s
   assert.equal(standardSpeedLabel, 'Standard');
 });
 
-test('summarizes the compact model and effective effort without default or workspace labels', () => {
+test('summarizes the selected model, effective effort, and Ask permission with picker wording', () => {
   assert.equal(
     runtimeSettingsSummary(runtime()),
-    '5.6 Sol · Low'
+    'GPT-5.6-Sol | Default (Low) | Ask'
   );
 });
 
-test('shows speed only when Fast is effective and maps full access permission', () => {
+test('shows only Fast speed and maps permission presets to their picker labels', () => {
   assert.equal(runtimeSettingsSummary(runtime({
     models: [{ value: 'gpt-5.6-terra', label: 'GPT-5.6-Terra', description: 'Frontier' }],
     model: 'gpt-5.6-terra',
@@ -52,23 +52,23 @@ test('shows speed only when Fast is effective and maps full access permission', 
     serviceTier: 'priority',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never'
-  })), '5.6 Terra · High · Fast · Full access');
+  })), 'GPT-5.6-Terra | High | Fast | Full');
 
   assert.equal(runtimeSettingsSummary(runtime({
     serviceTiers: [{ value: 'flex', label: 'Flexible', description: 'Lower priority' }],
     serviceTier: 'flex',
     sandbox: 'read-only'
-  })), '5.6 Sol · Low · Read only');
+  })), 'GPT-5.6-Sol | Default (Low) | Custom');
 
   assert.equal(runtimeSettingsSummary(runtime({
     defaultServiceTier: 'priority'
-  })), '5.6 Sol · Low · Fast');
+  })), 'GPT-5.6-Sol | Default (Low) | Ask');
 });
 
-test('shows delegated approval without implying broader sandbox access', () => {
+test('shows the Auto permission preset', () => {
   assert.equal(runtimeSettingsSummary(runtime({
     approvalsReviewer: 'auto_review'
-  })), '5.6 Sol · Low · Approve for me');
+  })), 'GPT-5.6-Sol | Default (Low) | Auto');
 });
 
 test('distinguishes unavailable and unlisted runtime values without blank labels', () => {
@@ -82,5 +82,5 @@ test('distinguishes unavailable and unlisted runtime values without blank labels
     serviceTiers: [],
     serviceTier: null,
     defaultServiceTier: null
-  })), 'private-model · Ultra');
+  })), 'private-model | Ultra | Ask');
 });
