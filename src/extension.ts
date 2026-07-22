@@ -93,6 +93,15 @@ export function activate(context: vscode.ExtensionContext): void {
       repository?.upsertThread(thread);
       if (repository) provider.setSnapshot(repository.snapshot());
     },
+    renameConversationThread: async (threadId, name) => {
+      const repo = repository;
+      const thread = repo?.findThread(threadId);
+      if (!repo || !thread || thread.archived || repo.isOperationPending(threadId)) {
+        throw new Error('The thread is not available for renaming.');
+      }
+      await repo.renameThread(threadId, name);
+      provider.setSnapshot(repo.snapshot());
+    },
     onConversationScreenChange: (open) => {
       void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, open);
     },

@@ -72,6 +72,7 @@ export interface ThreadListWebviewProviderOptions {
   readonly readConversationConfig?: (cwd: string) => Promise<ConversationConfigDefaults>;
   readonly readNewConversationDefaults?: () => NewConversationDefaults;
   readonly onConversationCreated?: (thread: Thread) => void;
+  readonly renameConversationThread?: (threadId: string, name: string) => Promise<void>;
   readonly onConversationScreenChange?: (open: boolean) => void;
   readonly respondToServerRequest?: (id: AppServerRequest['id'], result: unknown) => Promise<boolean>;
   readonly pickLocalImages?: () => Promise<readonly PickedLocalImage[]>;
@@ -275,6 +276,13 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
               message.requestId
             );
             return;
+          case 'threads/conversation/rename':
+            this.renameConversation(
+              message.sessionId,
+              message.threadId,
+              message.name
+            );
+            return;
           case 'threads/conversation/settings':
             this.updateConversationSettings(message.sessionId, message.threadId, message.settings);
             return;
@@ -369,6 +377,50 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     if (!this.resolvePendingRestore() && !this.activeThread && !this.newConversationDraft) {
       this.postListState();
     }
+  }
+
+  private renameConversation(sessionId: string, threadId: string, requestedName: string): void {
+    const session = this.conversationSession;
+    const name = requestedName.trim();
+    if (
+      !session ||
+      sessionId !== this.conversationSessionId ||
+      threadId !== this.activeThread?.id ||
+      !name ||
+      !this.options.renameConversationThread
+    ) {
+      void this.post({
+        type: 'threads/conversationRenameResult',
+        sessionId,
+        threadId,
+        outcome: 'rejected',
+        message: 'The thread name could not be changed. Reload the conversation and try again.'
+      });
+      return;
+    }
+    void this.options.renameConversationThread(threadId, name).then(
+      () => {
+        if (session === this.conversationSession && sessionId === this.conversationSessionId) {
+          session.updateTitle(name);
+        }
+        void this.post({
+          type: 'threads/conversationRenameResult',
+          sessionId,
+          threadId,
+          outcome: 'accepted',
+          name
+        });
+      },
+      () => {
+        void this.post({
+          type: 'threads/conversationRenameResult',
+          sessionId,
+          threadId,
+          outcome: 'rejected',
+          message: 'Codex could not rename this thread. Try again.'
+        });
+      }
+    );
   }
 
   public handleNotification(notification: AppServerNotification): void {
