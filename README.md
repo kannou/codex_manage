@@ -16,7 +16,7 @@ The MVP is packaged for private VSIX installation. Marketplace publication is no
 - Sends text prompts to an existing thread, streams Codex replies in place, and stops the active turn when needed.
 - Adds PNG, JPEG, GIF, or WebP images, host-selected file references, and enabled workspace Skills to the next message from the composer Add menu.
 - Starts a workspace-scoped conversation from the sidebar, applies the selected Runtime settings, and sends its first text prompt without creating a duplicate list entry.
-- Shows a compact summary in the Runtime trigger with the GPT version and variant, effective reasoning, Fast speed when selected, and non-standard sandbox permissions.
+- Shows the selected model and reasoning labels in the Runtime trigger, followed by Standard or Fast speed and any non-standard sandbox permissions.
 - Keeps the last confirmed transcript visible across disconnects and re-synchronizes it with `thread/resume` plus `thread/read` after reconnecting.
 - Preserves the list position when navigating back and restores the selected conversation by re-reading history after a VS Code window reload.
 - Keeps Pinned and Recent threads expanded by default, keeps Archive collapsed, and remembers each group's visibility.

@@ -15,7 +15,7 @@ export const standardSpeedLabel = 'Standard';
 export function runtimeSettingsSummary(runtime: ConversationRuntimeSettings | undefined): string {
   if (!runtime || runtime.status === 'loading') return 'Loading settings…';
   if (runtime.status === 'unavailable') return 'Unavailable';
-  const model = compactModelLabel(
+  const model = stripRuntimeMetadata(
     runtimeOptionLabel(runtime.models, runtime.model) ?? runtime.model ?? 'Model unavailable'
   );
   const effort = effectiveRuntimeLabel(
@@ -25,19 +25,10 @@ export function runtimeSettingsSummary(runtime: ConversationRuntimeSettings | un
   );
   const parts = [model];
   if (effort) parts.push(effort);
-  if (isFastRuntime(runtime)) parts.push('Fast');
+  parts.push(isFastRuntime(runtime) ? 'Fast' : standardSpeedLabel);
   const permission = runtimePermissionLabel(runtime);
   if (permission !== 'Ask for approval') parts.push(permission);
-  return parts.join(' · ');
-}
-
-export function compactModelLabel(label: string): string {
-  const version = label.match(/\bgpt[-_\s]*([0-9]+(?:\.[0-9]+)*)/iu)?.[1];
-  if (!version) return stripRuntimeMetadata(label);
-  const variant = label.match(/(?:^|[-_\s])(sol|terra|luna)(?=$|[-_\s(])/iu)?.[1];
-  return variant
-    ? `${version} ${variant[0]?.toUpperCase() ?? ''}${variant.slice(1).toLowerCase()}`
-    : version;
+  return parts.join(' | ');
 }
 
 export function runtimePermissionLabel(
@@ -75,13 +66,15 @@ function effectiveRuntimeLabel(
   selectedValue: string | null | undefined,
   defaultValue: string | null | undefined
 ): string | undefined {
-  const value = selectedValue ?? defaultValue;
-  if (!value) return undefined;
-  return stripRuntimeMetadata(runtimeOptionLabel(options, value) ?? runtimeValueLabel(value));
+  if (selectedValue) {
+    return stripRuntimeMetadata(runtimeOptionLabel(options, selectedValue) ?? runtimeValueLabel(selectedValue));
+  }
+  if (!defaultValue) return undefined;
+  return defaultRuntimeLabel('Default', defaultValue, options);
 }
 
 function isFastRuntime(runtime: ConversationRuntimeSettings): boolean {
-  const value = runtime.serviceTier ?? runtime.defaultServiceTier;
+  const value = runtime.serviceTier;
   if (!value) return false;
   const label = stripRuntimeMetadata(runtimeOptionLabel(runtime.serviceTiers, value) ?? value);
   return value.toLowerCase() === 'fast' || value.toLowerCase() === 'priority' || label.toLowerCase() === 'fast';
