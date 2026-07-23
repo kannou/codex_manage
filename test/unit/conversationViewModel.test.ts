@@ -118,6 +118,7 @@ test('maps stored history in order while excluding sensitive work payloads', () 
   assert.equal(model.turns[0]?.startedAt, 1_752_633_600_000);
   assert.equal(model.turns[0]?.durationMs, 2_000);
   assert.equal(model.turns[0]?.errorMessage, 'Fixture failure');
+  assert.deepEqual(model.turns[0]?.workDetails, { count: 5, status: 'Failed' });
 
   const userMessage = model.turns[0]?.items[0];
   assert.equal(userMessage?.kind, 'message');
@@ -205,4 +206,55 @@ test('does not render an empty reasoning summary card', () => {
   }));
 
   assert.deepEqual(model.turns[0]?.items, []);
+  assert.equal(model.turns[0]?.workDetails, null);
+});
+
+test('keeps live work items separate and groups the same items after completion and reload', () => {
+  const turnItems = [items[0]!, items[3]!, items[4]!, items[1]!];
+  const running = toConversationViewModel(createThread({
+    status: { type: 'active', activeFlags: [] },
+    turns: [createTurn({
+      status: 'inProgress',
+      completedAt: null,
+      durationMs: null,
+      items: turnItems
+    })]
+  }));
+  const completedThread = createThread({
+    turns: [createTurn({ items: turnItems })]
+  });
+  const completed = toConversationViewModel(completedThread);
+  const reloaded = toConversationViewModel(completedThread);
+
+  assert.equal(running.turns[0]?.workDetails, null);
+  assert.deepEqual(completed.turns[0]?.workDetails, { count: 2, status: null });
+  assert.deepEqual(reloaded.turns[0]?.workDetails, completed.turns[0]?.workDetails);
+  assert.deepEqual(
+    completed.turns[0]?.items.map((item) => item.id),
+    turnItems.map((item) => item.id)
+  );
+});
+
+test('reports interrupted and declined work in the collapsed heading', () => {
+  const interrupted = toConversationViewModel(createThread({
+    turns: [createTurn({
+      status: 'interrupted',
+      items: [items[3]!]
+    })]
+  }));
+  const declinedCommand: ThreadItem = {
+    ...items[3] as Extract<ThreadItem, { type: 'commandExecution' }>,
+    id: 'command-declined',
+    status: 'declined'
+  };
+  const declined = toConversationViewModel(createThread({
+    turns: [createTurn({ items: [declinedCommand] })]
+  }));
+  const messagesOnly = toConversationViewModel(createThread({
+    turns: [createTurn({ items: [items[0]!, items[1]!] })]
+  }));
+
+  assert.deepEqual(interrupted.turns[0]?.workDetails, { count: 1, status: 'Interrupted' });
+  assert.deepEqual(declined.turns[0]?.workDetails, { count: 1, status: 'Declined' });
+  assert.equal(messagesOnly.turns[0]?.workDetails, null);
 });

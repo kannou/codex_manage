@@ -213,18 +213,96 @@ function reconcileItems(items: HTMLElement, turn: ConversationTurnViewModel): vo
     return;
   }
 
+  const activeElement = document.activeElement;
+  const focused = activeElement instanceof HTMLElement && items.contains(activeElement)
+    ? activeElement
+    : undefined;
+  const existingWorkDetails = directChildWithClass(items, 'work-details');
+  const existingWorkItems = existingWorkDetails
+    ? directChildWithClass(existingWorkDetails, 'work-details-items')
+    : undefined;
   const existing = keyedChildren(items, 'itemId');
+  if (existingWorkItems) {
+    for (const [id, element] of keyedChildren(existingWorkItems, 'itemId')) {
+      if (!existing.has(id)) existing.set(id, element);
+    }
+  }
+  const workDetails = turn.workDetails
+    ? existingWorkDetails instanceof HTMLDetailsElement
+      ? existingWorkDetails
+      : createWorkDetails()
+    : undefined;
+  const workItems = workDetails
+    ? requiredDescendant<HTMLElement>(workDetails, '.work-details-items')
+    : undefined;
+  if (workDetails && turn.workDetails) updateWorkDetails(workDetails, turn.workDetails);
+
   const retained = new Set<HTMLElement>();
-  turn.items.forEach((item, index) => {
+  const retainedWorkItems = new Set<HTMLElement>();
+  let topLevelIndex = 0;
+  let workItemIndex = 0;
+  let placedWorkDetails = false;
+  for (const item of turn.items) {
     let element = existing.get(item.id);
     if (!element || !isCompatibleItemElement(element, item)) {
       element = createItem(item);
     }
     updateItem(element, item, turn);
-    placeChild(items, element, index);
-    retained.add(element);
-  });
+    if (item.kind === 'activity' && workDetails && workItems) {
+      if (!placedWorkDetails) {
+        placeChild(items, workDetails, topLevelIndex++);
+        retained.add(workDetails);
+        placedWorkDetails = true;
+      }
+      placeChild(workItems, element, workItemIndex++);
+      retainedWorkItems.add(element);
+    } else {
+      placeChild(items, element, topLevelIndex++);
+      retained.add(element);
+    }
+  }
+  if (workItems) removeUnretainedChildren(workItems, retainedWorkItems);
   removeUnretainedChildren(items, retained);
+  if (focused?.isConnected && document.activeElement !== focused) {
+    focused.focus({ preventScroll: true });
+  }
+}
+
+function createWorkDetails(): HTMLDetailsElement {
+  const details = document.createElement('details');
+  details.className = 'work-details';
+  const summary = document.createElement('summary');
+  summary.className = 'work-details-summary';
+  const title = document.createElement('span');
+  title.className = 'work-details-title';
+  summary.append(title);
+  const workItems = document.createElement('div');
+  workItems.className = 'work-details-items';
+  details.append(summary, workItems);
+  return details;
+}
+
+function updateWorkDetails(
+  details: HTMLDetailsElement,
+  workDetails: NonNullable<ConversationTurnViewModel['workDetails']>
+): void {
+  const summary = requiredDescendant<HTMLElement>(details, '.work-details-summary');
+  setTextContent(
+    requiredDescendant<HTMLElement>(summary, '.work-details-title'),
+    `Work details (${workDetails.count})`
+  );
+  const currentStatus = directChildWithClass(summary, 'work-details-status');
+  if (!workDetails.status) {
+    currentStatus?.remove();
+    return;
+  }
+  const status = currentStatus ?? document.createElement('span');
+  setClassName(
+    status,
+    `status work-details-status status-${statusClass(workDetails.status)}`
+  );
+  setTextContent(status, workDetails.status);
+  if (!currentStatus) summary.append(status);
 }
 
 function createItem(item: ConversationItemViewModel): HTMLElement {

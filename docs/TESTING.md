@@ -94,6 +94,7 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Confirm Send/Stop stays aligned to the right edge when the composer status is empty, running, stopping, waiting for input, or unavailable; at narrow sidebar widths, status text must wrap without pushing the controls off-screen.
 - Double-click Send and press the shortcut repeatedly while sending; confirm only one turn starts and the draft clears only after acceptance.
 - Confirm the Codex reply grows in place while streaming without collapsing an expanded work card or moving focus unexpectedly.
+- Confirm work cards remain individually visible while a turn runs, then move into one collapsed **Work details (count)** group after completion while the final response stays outside. Expand it, Reload, and confirm its open state, item order, focus, and failure/interruption badge remain correct.
 - Confirm a running reasoning summary is readable without opening a card, then completes as a collapsed **Reasoning summary** card only when the reloaded authoritative history retains it; the transition must not move focus or the viewport.
 - Keep a response streaming for at least 15 minutes and confirm memory remains stable enough for continued navigation, Stop, and Back operations.
 - Scroll away from the bottom during a response and confirm streaming does not force the viewport back down.

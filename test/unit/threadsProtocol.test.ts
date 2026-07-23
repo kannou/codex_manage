@@ -28,6 +28,7 @@ const conversationState = {
         completedAt: null,
         durationMs: null,
         errorMessage: null,
+        workDetails: null,
         items: [
           { kind: 'message', id: 'message-1', role: 'assistant', text: 'Hello' }
         ]
@@ -317,6 +318,30 @@ test('validates persisted navigation state and host messages', () => {
     }
   }), true);
   assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: {
+      ...conversationState,
+      model: {
+        ...conversationState.model,
+        turns: [{
+          ...conversationState.model.turns[0],
+          status: 'Completed',
+          workDetails: { count: 1, status: 'Failed' },
+          items: [{
+            kind: 'activity',
+            id: 'command-1',
+            activityKind: 'command',
+            title: 'npm test',
+            status: 'Failed',
+            detail: null,
+            detailPresentation: 'collapsible'
+          }]
+        }]
+      },
+      execution: { kind: 'idle' }
+    }
+  }), true);
+  assert.equal(isThreadsHostMessage({
     type: 'threads/conversationError',
     sessionId: 'session-1',
     threadId: 'thread-1',
@@ -334,6 +359,16 @@ test('validates persisted navigation state and host messages', () => {
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',
     state: { ...conversationState, revision: -1 }
+  }), false);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: {
+      ...conversationState,
+      model: {
+        ...conversationState.model,
+        turns: [{ ...conversationState.model.turns[0], workDetails: { count: 0, status: null } }]
+      }
+    }
   }), false);
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',
