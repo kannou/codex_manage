@@ -291,6 +291,91 @@ details .activity-summary {
   border-top: 1px solid var(--vscode-widget-border);
 }
 
+.changed-files {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 4px;
+}
+
+.changed-files-summary {
+  padding: 9px 11px;
+  cursor: pointer;
+}
+
+.changed-files-title {
+  overflow-wrap: anywhere;
+}
+
+.changed-files-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border-top: 1px solid var(--vscode-widget-border);
+}
+
+.changed-files-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.changed-file-kind {
+  width: 1.5em;
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-weight: 600;
+  text-align: center;
+}
+
+.changed-file-kind-added {
+  color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-foreground));
+}
+
+.changed-file-kind-updated {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-foreground));
+}
+
+.changed-file-kind-deleted {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-foreground));
+}
+
+.changed-file-kind-moved {
+  color: var(--vscode-gitDecoration-renamedResourceForeground, var(--vscode-foreground));
+}
+
+.changed-file-path {
+  min-width: 0;
+  padding: 4px 5px;
+  overflow: hidden;
+  color: var(--vscode-foreground);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+}
+
+button.changed-file-path {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+
+button.changed-file-path:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}
+
+.changed-file-kind-deleted + .changed-file-path {
+  color: var(--vscode-disabledForeground);
+}
+
 .status {
   flex: none;
   padding: 2px 7px;
@@ -336,6 +421,8 @@ details .activity-summary {
   .activity-card,
   .work-details,
   .work-details-items,
+  .changed-files,
+  .changed-files-list,
   .activity-detail,
   .turn-error,
   .secondary-button {
@@ -343,6 +430,7 @@ details .activity-summary {
   }
 
   .secondary-button:focus-visible,
+  .changed-file-path:focus-visible,
   summary:focus-visible {
     outline: 2px solid Highlight;
   }

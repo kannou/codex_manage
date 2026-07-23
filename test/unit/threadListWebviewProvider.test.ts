@@ -6,6 +6,7 @@ import type { ThreadResumeResponse } from '../../src/codex/protocol/generated/v2
 import type { ThreadStartResponse } from '../../src/codex/protocol/generated/v2/ThreadStartResponse';
 import type { Model } from '../../src/codex/protocol/generated/v2/Model';
 import type { Turn } from '../../src/codex/protocol/generated/v2/Turn';
+import type { ThreadItem } from '../../src/codex/protocol/generated/v2/ThreadItem';
 import type { ThreadDisplayModel, ThreadRepositorySnapshot } from '../../src/codex/threadRepository';
 import type { ConversationSessionClient } from '../../src/conversation/conversationSession';
 import { ThreadListWebviewProvider } from '../../src/views/threadListWebviewProvider';
@@ -786,6 +787,80 @@ test('persists turn bookmarks, filters missing turns, and rejects unknown turn r
   });
   await flushPromises();
   assert.equal(writes.length, 1);
+});
+
+test('opens a validated changed file and rejects stale or unknown file requests', async (t) => {
+  setWorkspace();
+  const opened: string[] = [];
+  (vscode.window as unknown as {
+    showTextDocument: (uri: vscode.Uri) => Promise<unknown>;
+  }).showTextDocument = async (uri) => {
+    opened.push(uri.fsPath);
+    return {};
+  };
+  const fileChange: ThreadItem = {
+    type: 'fileChange',
+    id: 'file-change-1',
+    changes: [
+      { path: 'src/example.ts', kind: { type: 'update', move_path: null }, diff: '' },
+      { path: 'D:\\outside\\hidden.ts', kind: { type: 'update', move_path: null }, diff: '' }
+    ],
+    status: 'completed'
+  };
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async (threadId) => createThread({
+      id: threadId,
+      turns: [createTurn({ id: 'turn-files', items: [fileChange] })]
+    })),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+
+  const loaded = view.webview.postedMessages.find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as {
+    state: {
+      sessionId: string;
+      model: { turns: Array<{ changedFiles: Array<{ id: string; path: string }> }> };
+    };
+  };
+  const changedFiles = loaded.state.model.turns[0]?.changedFiles ?? [];
+  assert.equal(changedFiles.length, 1);
+  assert.equal(changedFiles[0]?.path, 'src/example.ts');
+  const fileId = changedFiles[0]?.id;
+  assert.ok(fileId);
+
+  view.webview.fire({
+    type: 'threads/conversation/openChangedFile',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-files',
+    fileId
+  });
+  view.webview.fire({
+    type: 'threads/conversation/openChangedFile',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-stale',
+    fileId
+  });
+  view.webview.fire({
+    type: 'threads/conversation/openChangedFile',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-files',
+    fileId: 'changed-file-unknown'
+  });
+  await flushPromises();
+
+  assert.deepEqual(opened, ['D:\\workspace\\src\\example.ts']);
 });
 
 test('sends, streams, and stops only the active sidebar conversation', async (t) => {

@@ -261,10 +261,91 @@ function reconcileItems(items: HTMLElement, turn: ConversationTurnViewModel): vo
       retained.add(element);
     }
   }
+  if (turn.changedFiles.length > 0) {
+    const existingChangedFiles = directChildWithClass(items, 'changed-files');
+    const changedFiles = existingChangedFiles instanceof HTMLDetailsElement
+      ? existingChangedFiles
+      : createChangedFiles();
+    updateChangedFiles(changedFiles, turn);
+    placeChild(items, changedFiles, topLevelIndex++);
+    retained.add(changedFiles);
+  }
   if (workItems) removeUnretainedChildren(workItems, retainedWorkItems);
   removeUnretainedChildren(items, retained);
   if (focused?.isConnected && document.activeElement !== focused) {
     focused.focus({ preventScroll: true });
+  }
+}
+
+function createChangedFiles(): HTMLDetailsElement {
+  const details = document.createElement('details');
+  details.className = 'changed-files';
+  const summary = document.createElement('summary');
+  summary.className = 'changed-files-summary';
+  const title = document.createElement('span');
+  title.className = 'changed-files-title';
+  summary.append(title);
+  const list = document.createElement('ul');
+  list.className = 'changed-files-list';
+  details.append(summary, list);
+  return details;
+}
+
+function updateChangedFiles(section: HTMLElement, turn: ConversationTurnViewModel): void {
+  setTextContent(
+    requiredDescendant<HTMLElement>(section, '.changed-files-title'),
+    `Changed files (${turn.changedFiles.length})`
+  );
+  const list = requiredDescendant<HTMLElement>(section, '.changed-files-list');
+  const existing = keyedChildren(list, 'fileId');
+  const retained = new Set<HTMLElement>();
+  turn.changedFiles.forEach((file, index) => {
+    let row = existing.get(file.id);
+    if (!row || row.dataset.canOpen !== String(file.canOpen)) {
+      row = document.createElement('li');
+      const kind = document.createElement('span');
+      kind.className = 'changed-file-kind';
+      const path = document.createElement(file.canOpen ? 'button' : 'span');
+      path.className = 'changed-file-path';
+      if (path instanceof HTMLButtonElement) {
+        path.type = 'button';
+        path.dataset.action = 'open-changed-file';
+      }
+      row.append(kind, path);
+    }
+    row.dataset.fileId = file.id;
+    row.dataset.canOpen = String(file.canOpen);
+    const kind = requiredDescendant<HTMLElement>(row, '.changed-file-kind');
+    setClassName(kind, `changed-file-kind changed-file-kind-${file.change.toLowerCase()}`);
+    setTextContent(kind, changedFileCode(file.change));
+    kind.title = file.change;
+    kind.setAttribute('aria-label', file.change);
+    const path = requiredDescendant<HTMLElement>(row, '.changed-file-path');
+    setTextContent(path, file.path);
+    if (path instanceof HTMLButtonElement) {
+      path.dataset.turnId = turn.id;
+      path.dataset.fileId = file.id;
+      path.title = `Open ${file.path}`;
+      path.setAttribute('aria-label', `Open changed file ${file.path}`);
+    }
+    placeChild(list, row, index);
+    retained.add(row);
+  });
+  removeUnretainedChildren(list, retained);
+}
+
+function changedFileCode(
+  change: ConversationTurnViewModel['changedFiles'][number]['change']
+): string {
+  switch (change) {
+    case 'Added':
+      return 'A';
+    case 'Updated':
+      return 'M';
+    case 'Deleted':
+      return 'D';
+    case 'Moved':
+      return 'R';
   }
 }
 
@@ -470,7 +551,7 @@ function setClassName(element: HTMLElement, value: string): void {
   }
 }
 
-function keyedChildren(parent: HTMLElement, key: 'turnId' | 'itemId'): Map<string, HTMLElement> {
+function keyedChildren(parent: HTMLElement, key: 'turnId' | 'itemId' | 'fileId'): Map<string, HTMLElement> {
   const result = new Map<string, HTMLElement>();
   for (const child of parent.children) {
     if (child instanceof HTMLElement) {

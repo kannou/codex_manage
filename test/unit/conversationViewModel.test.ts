@@ -119,6 +119,7 @@ test('maps stored history in order while excluding sensitive work payloads', () 
   assert.equal(model.turns[0]?.durationMs, 2_000);
   assert.equal(model.turns[0]?.errorMessage, 'Fixture failure');
   assert.deepEqual(model.turns[0]?.workDetails, { count: 5, status: 'Failed' });
+  assert.deepEqual(model.turns[0]?.changedFiles, []);
 
   const userMessage = model.turns[0]?.items[0];
   assert.equal(userMessage?.kind, 'message');
@@ -257,4 +258,77 @@ test('reports interrupted and declined work in the collapsed heading', () => {
   assert.deepEqual(interrupted.turns[0]?.workDetails, { count: 1, status: 'Interrupted' });
   assert.deepEqual(declined.turns[0]?.workDetails, { count: 1, status: 'Declined' });
   assert.equal(messagesOnly.turns[0]?.workDetails, null);
+});
+
+test('lists completed workspace file changes once with safe relative paths', () => {
+  const fileChanges: ThreadItem[] = [
+    {
+      type: 'fileChange',
+      id: 'files-first',
+      changes: [
+        { path: 'src/new.ts', kind: { type: 'add' }, diff: '' },
+        { path: 'src/shared.ts', kind: { type: 'add' }, diff: '' },
+        { path: 'src/old.ts', kind: { type: 'delete' }, diff: '' },
+        {
+          path: 'src/before.ts',
+          kind: { type: 'update', move_path: 'src/after.ts' },
+          diff: ''
+        },
+        { path: '..\\escape.ts', kind: { type: 'update', move_path: null }, diff: '' },
+        { path: 'D:\\outside\\hidden.ts', kind: { type: 'update', move_path: null }, diff: '' }
+      ],
+      status: 'completed'
+    },
+    {
+      type: 'fileChange',
+      id: 'files-second',
+      changes: [
+        { path: 'src/shared.ts', kind: { type: 'update', move_path: null }, diff: '' },
+        { path: 'D:\\other\\nested.ts', kind: { type: 'update', move_path: null }, diff: '' }
+      ],
+      status: 'completed'
+    }
+  ];
+  const thread = createThread({
+    cwd: 'D:\\workspace',
+    turns: [createTurn({ items: [...fileChanges, items[1]!] })]
+  });
+  const folders = [
+    { path: 'D:\\workspace', name: 'workspace' },
+    { path: 'D:\\other', name: 'other' }
+  ];
+  const model = toConversationViewModel(thread, folders);
+  const reloaded = toConversationViewModel(thread, folders);
+
+  assert.deepEqual(
+    model.turns[0]?.changedFiles.map(({ path, change, canOpen }) => ({ path, change, canOpen })),
+    [
+      { path: 'workspace/src/new.ts', change: 'Added', canOpen: true },
+      { path: 'workspace/src/shared.ts', change: 'Updated', canOpen: true },
+      { path: 'workspace/src/old.ts', change: 'Deleted', canOpen: false },
+      { path: 'workspace/src/after.ts', change: 'Moved', canOpen: true },
+      { path: 'other/nested.ts', change: 'Updated', canOpen: true }
+    ]
+  );
+  assert.deepEqual(reloaded.turns[0]?.changedFiles, model.turns[0]?.changedFiles);
+  assert.equal(model.cwd, 'D:\\workspace');
+  assert.equal(JSON.stringify(model.turns[0]?.changedFiles).includes('D:\\'), false);
+});
+
+test('does not list provisional or running file changes', () => {
+  const fileChange = items[4]!;
+  const running = toConversationViewModel(createThread({
+    turns: [createTurn({
+      status: 'inProgress',
+      completedAt: null,
+      durationMs: null,
+      items: [fileChange]
+    })]
+  }), [{ path: 'D:\\workspace' }]);
+  const partial = toConversationViewModel(createThread({
+    turns: [createTurn({ itemsView: 'summary', items: [fileChange] })]
+  }), [{ path: 'D:\\workspace' }]);
+
+  assert.deepEqual(running.turns[0]?.changedFiles, []);
+  assert.deepEqual(partial.turns[0]?.changedFiles, []);
 });

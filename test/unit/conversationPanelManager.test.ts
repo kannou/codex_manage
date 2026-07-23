@@ -200,3 +200,81 @@ test('restores a valid panel and rejects invalid persisted state', async (t) => 
   assert.equal(invalid.disposed, true);
   assert.equal(warnings.length, 1);
 });
+
+test('opens only a current openable workspace file from the loaded turn', async (t) => {
+  (vscode.workspace as unknown as {
+    workspaceFolders: Array<{ name: string; uri: { fsPath: string } }>;
+  }).workspaceFolders = [{ name: 'workspace', uri: { fsPath: 'D:\\workspace' } }];
+  const opened: string[] = [];
+  (vscode.window as unknown as {
+    showTextDocument: (uri: vscode.Uri) => Promise<unknown>;
+  }).showTextDocument = async (uri) => {
+    opened.push(uri.fsPath);
+    return {};
+  };
+  const panels: FakeWebviewPanel[] = [];
+  installPanelFactory(panels);
+  const manager = new ConversationPanelManager({
+    extensionUri: vscode.Uri.file('D:\\extension'),
+    readThread: async () => createThread({
+      turns: [{
+        id: 'turn-files',
+        items: [{
+          type: 'fileChange',
+          id: 'file-change',
+          changes: [
+            { path: 'src/example.ts', kind: { type: 'update', move_path: null }, diff: '' },
+            { path: 'src/deleted.ts', kind: { type: 'delete' }, diff: '' }
+          ],
+          status: 'completed'
+        }],
+        itemsView: 'full',
+        status: 'completed',
+        error: null,
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1_000
+      }]
+    }),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => manager.dispose());
+
+  manager.openThread({ id: 'thread-1', title: 'Thread 1' });
+  panels[0]?.webview.fire({ type: 'conversation/ready' });
+  await flushPromises();
+  const loaded = panels[0]?.webview.postedMessages.find(
+    (message) => (message as { type?: unknown }).type === 'conversation/loaded'
+  ) as {
+    model: {
+      turns: Array<{
+        id: string;
+        changedFiles: Array<{ id: string; canOpen: boolean }>;
+      }>;
+    };
+  };
+  const changedFiles = loaded.model.turns[0]?.changedFiles ?? [];
+  const openable = changedFiles.find((file) => file.canOpen);
+  const deleted = changedFiles.find((file) => !file.canOpen);
+  assert.ok(openable);
+  assert.ok(deleted);
+
+  panels[0]?.webview.fire({
+    type: 'conversation/openChangedFile',
+    turnId: 'turn-files',
+    fileId: openable.id
+  });
+  panels[0]?.webview.fire({
+    type: 'conversation/openChangedFile',
+    turnId: 'turn-files',
+    fileId: deleted.id
+  });
+  panels[0]?.webview.fire({
+    type: 'conversation/openChangedFile',
+    turnId: 'turn-stale',
+    fileId: openable.id
+  });
+  await flushPromises();
+
+  assert.deepEqual(opened, ['D:\\workspace\\src\\example.ts']);
+});
