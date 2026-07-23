@@ -15,6 +15,7 @@ import type {
 
 export const MAX_COMPOSER_TEXT_LENGTH = 100_000;
 export const MAX_CONVERSATION_ID_LENGTH = 512;
+export const MAX_THREAD_NAME_LENGTH = 512;
 
 export type ThreadListAction =
   | 'loadMoreActive'
@@ -128,6 +129,12 @@ export type ThreadsWebviewToHostMessage =
   | { readonly type: 'threads/back' }
   | { readonly type: 'threads/reload' }
   | {
+    readonly type: 'threads/conversation/rename';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly name: string;
+  }
+  | {
     readonly type: 'threads/conversation/send';
     readonly sessionId: string;
     readonly threadId: string;
@@ -229,6 +236,14 @@ export type ThreadsHostToWebviewMessage =
     readonly title: string;
     readonly message: string;
   }
+  | {
+    readonly type: 'threads/conversationRenameResult';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly outcome: 'accepted' | 'rejected';
+    readonly name?: string;
+    readonly message?: string;
+  }
   | ConversationOperationResult;
 
 export interface ThreadsWebviewState {
@@ -286,6 +301,16 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       typeof value.text === 'string' &&
       Boolean(value.text.trim()) &&
       value.text.length <= MAX_COMPOSER_TEXT_LENGTH
+    );
+  }
+  if (value.type === 'threads/conversation/rename') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'name']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      typeof value.name === 'string' &&
+      Boolean(value.name.trim()) &&
+      value.name.length <= MAX_THREAD_NAME_LENGTH
     );
   }
   if (value.type === 'threads/conversation/stop') {
@@ -383,6 +408,15 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
       );
     case 'threads/conversationOperationResult':
       return isConversationOperationResult(value);
+    case 'threads/conversationRenameResult':
+      if (!(
+        isBoundedId(value.sessionId) &&
+        isBoundedId(value.threadId) &&
+        (value.outcome === 'accepted' || value.outcome === 'rejected')
+      )) return false;
+      return value.outcome === 'accepted'
+        ? typeof value.name === 'string' && Boolean(value.name.trim()) && value.message === undefined
+        : typeof value.message === 'string' && value.name === undefined;
     default:
       return false;
   }

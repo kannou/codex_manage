@@ -688,6 +688,43 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
   assert.match(JSON.stringify(view.webview.postedMessages[1]), /Renamed while open/u);
 });
 
+test('renames only the active conversation and publishes the updated title', async (t) => {
+  setWorkspace();
+  const renames: Array<{ threadId: string; name: string }> = [];
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
+    renameConversationThread: async (threadId, name) => {
+      renames.push({ threadId, name });
+    },
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const loaded = view.webview.postedMessages.find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { sessionId: string } };
+
+  view.webview.fire({
+    type: 'threads/conversation/rename',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    name: '  Renamed here  '
+  });
+  await flushPromises();
+
+  assert.deepEqual(renames, [{ threadId: 'thread-1', name: 'Renamed here' }]);
+  const messages = view.webview.postedMessages.filter(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationRenameResult'
+  ) as Array<{ outcome: string; name?: string }>;
+  assert.deepEqual(messages.at(-1), { type: 'threads/conversationRenameResult', sessionId: loaded.state.sessionId, threadId: 'thread-1', outcome: 'accepted', name: 'Renamed here' });
+});
+
 test('persists turn bookmarks, filters missing turns, and rejects unknown turn requests', async (t) => {
   setWorkspace();
   const bookmarks = new Map<string, string[]>([

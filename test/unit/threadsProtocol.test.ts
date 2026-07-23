@@ -96,6 +96,18 @@ test('requires thread IDs only for thread-scoped management actions', () => {
 
 test('accepts bounded composer actions and rejects arbitrary conversation payloads', () => {
   assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/rename',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    name: 'Renamed thread'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/rename',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    name: '   '
+  }), false);
+  assert.equal(isThreadsWebviewMessage({
     type: 'threads/conversation/send',
     sessionId: 'session-1',
     threadId: 'thread-1',

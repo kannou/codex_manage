@@ -83,6 +83,9 @@ let conversationTarget: ConversationRenderTarget | undefined;
 let conversationComposerTarget: ConversationComposerTarget | undefined;
 let conversationInteractionsTarget: HTMLElement | undefined;
 let conversationBookmarksTarget: HTMLSelectElement | undefined;
+let conversationTitleButton: HTMLButtonElement | undefined;
+let conversationTitleInput: HTMLInputElement | undefined;
+let conversationTitleStatus: HTMLElement | undefined;
 let conversationThreadId: string | undefined;
 let conversationSessionId: string | undefined;
 let conversationScreenState: ConversationScreenState | undefined;
@@ -362,6 +365,9 @@ function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
       return;
     case 'threads/conversationOperationResult':
       handleConversationOperationResult(message);
+      return;
+    case 'threads/conversationRenameResult':
+      handleConversationRenameResult(message);
   }
 }
 
@@ -570,11 +576,35 @@ function showConversationShell(
   back.append(actionIcon('back'));
   const heading = document.createElement('div');
   heading.className = 'conversation-heading';
-  const titleElement = document.createElement('h1');
+  const titleElement = document.createElement('button');
+  titleElement.className = 'conversation-title';
+  titleElement.type = 'button';
   titleElement.textContent = title;
+  titleElement.title = 'Rename thread';
+  titleElement.setAttribute('aria-label', `Rename thread: ${title}`);
+  const titleInput = document.createElement('input');
+  titleInput.className = 'conversation-title-input';
+  titleInput.type = 'text';
+  titleInput.maxLength = 512;
+  titleInput.setAttribute('aria-label', 'Thread name');
+  titleInput.hidden = true;
+  const titleStatus = document.createElement('span');
+  titleStatus.className = 'sr-only';
+  titleStatus.setAttribute('role', 'status');
+  titleStatus.setAttribute('aria-live', 'polite');
+  titleElement.addEventListener('click', beginConversationTitleEdit);
+  titleInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      finishConversationTitleEdit(false);
+    } else if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      submitConversationTitle();
+    }
+  });
   const meta = document.createElement('p');
   meta.className = 'muted conversation-meta';
-  heading.append(titleElement, meta);
+  heading.append(titleElement, titleInput, titleStatus, meta);
   const bookmarks = document.createElement('select');
   bookmarks.className = 'conversation-bookmarks';
   bookmarks.setAttribute('aria-label', 'Go to bookmarked turn');
@@ -714,6 +744,9 @@ function showConversationShell(
   section.append(header, notice, content, interactions, announcer, composer);
   app.append(section);
   conversationTarget = { title: titleElement, meta, notice, content };
+  conversationTitleButton = titleElement;
+  conversationTitleInput = titleInput;
+  conversationTitleStatus = titleStatus;
   conversationComposerTarget = {
     container: composer, input, send, stop, status, error, announcer,
     add, addMenu, attachments, settings, settingsSummary, settingsCurrent,
@@ -764,6 +797,9 @@ function resetConversationContext(): void {
   conversationComposerTarget = undefined;
   conversationInteractionsTarget = undefined;
   conversationBookmarksTarget = undefined;
+  conversationTitleButton = undefined;
+  conversationTitleInput = undefined;
+  conversationTitleStatus = undefined;
   conversationThreadId = undefined;
   conversationSessionId = undefined;
   conversationScreenState = undefined;
@@ -774,6 +810,63 @@ function resetConversationContext(): void {
   lastAnnouncedCompletedTurnId = undefined;
   pendingConversationSend = undefined;
   pendingConversationStopRequestId = undefined;
+}
+
+function beginConversationTitleEdit(): void {
+  const button = conversationTitleButton;
+  const input = conversationTitleInput;
+  if (!button || !input || !conversationSessionId || !conversationThreadId) return;
+  input.value = button.textContent ?? '';
+  input.hidden = false;
+  button.hidden = true;
+  input.focus({ preventScroll: true });
+  input.select();
+}
+
+function finishConversationTitleEdit(announce: boolean): void {
+  const button = conversationTitleButton;
+  const input = conversationTitleInput;
+  if (!button || !input) return;
+  input.hidden = true;
+  input.disabled = false;
+  input.removeAttribute('aria-invalid');
+  button.hidden = false;
+  button.focus({ preventScroll: true });
+  if (announce && conversationTitleStatus) conversationTitleStatus.textContent = 'Thread renamed.';
+}
+
+function submitConversationTitle(): void {
+  const input = conversationTitleInput;
+  const name = input?.value.trim() ?? '';
+  if (!input || !conversationSessionId || !conversationThreadId) return;
+  if (!name) {
+    input.setAttribute('aria-invalid', 'true');
+    if (conversationTitleStatus) conversationTitleStatus.textContent = 'Thread name cannot be empty.';
+    return;
+  }
+  input.removeAttribute('aria-invalid');
+  input.disabled = true;
+  vscode.postMessage({ type: 'threads/conversation/rename', sessionId: conversationSessionId, threadId: conversationThreadId, name });
+}
+
+function handleConversationRenameResult(
+  message: Extract<ThreadsHostToWebviewMessage, { type: 'threads/conversationRenameResult' }>
+): void {
+  if (!isActiveConversation(message.sessionId, message.threadId)) return;
+  if (message.outcome === 'accepted') {
+    if (conversationTitleButton && message.name) {
+      conversationTitleButton.textContent = message.name;
+      conversationTitleButton.setAttribute('aria-label', `Rename thread: ${message.name}`);
+    }
+    finishConversationTitleEdit(true);
+    return;
+  }
+  if (conversationTitleInput) {
+    conversationTitleInput.disabled = false;
+    conversationTitleInput.setAttribute('aria-invalid', 'true');
+    conversationTitleInput.focus({ preventScroll: true });
+  }
+  if (conversationTitleStatus) conversationTitleStatus.textContent = message.message ?? 'Thread could not be renamed.';
 }
 
 function queueConversationState(state: ConversationScreenState): void {
@@ -808,6 +901,9 @@ function renderPendingConversationState(): void {
     bookmarkedTurnIds: state.bookmarkedTurnIds,
     enableTurnBookmarks: true
   });
+  if (conversationTitleButton) {
+    conversationTitleButton.setAttribute('aria-label', `Rename thread: ${state.model.title}`);
+  }
   updateConversationBookmarks(state);
   if (conversationInteractionsTarget) renderConversationInteractions(conversationInteractionsTarget, state.interactions);
   announceCompletedConversationTurn(state.model, initialRender);
