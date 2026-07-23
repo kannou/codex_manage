@@ -455,6 +455,19 @@ button.turn-bookmark-toggle:hover {
   max-width: 100%;
 }
 
+.conversation-view .message-assistant,
+.conversation-view .copyable-code { position: relative; }
+
+.conversation-view .copy-control {
+  float: right;
+  margin: 0 0 4px 8px;
+  color: var(--vscode-foreground);
+  background: transparent;
+  border: 1px solid var(--vscode-button-border, var(--vscode-widget-border));
+  border-radius: 3px;
+  cursor: pointer;
+}
+
 .conversation-view .activity-summary {
   padding: 8px;
 }

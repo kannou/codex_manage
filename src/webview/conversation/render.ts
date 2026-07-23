@@ -220,7 +220,7 @@ function reconcileItems(items: HTMLElement, turn: ConversationTurnViewModel): vo
     if (!element || !isCompatibleItemElement(element, item)) {
       element = createItem(item);
     }
-    updateItem(element, item);
+    updateItem(element, item, turn);
     placeChild(items, element, index);
     retained.add(element);
   });
@@ -248,7 +248,7 @@ function createItem(item: ConversationItemViewModel): HTMLElement {
   return card;
 }
 
-function updateItem(element: HTMLElement, item: ConversationItemViewModel): void {
+function updateItem(element: HTMLElement, item: ConversationItemViewModel, turn: ConversationTurnViewModel): void {
   element.dataset.itemId = item.id;
   element.dataset.itemKind = item.kind;
   if (item.kind === 'message') {
@@ -256,6 +256,7 @@ function updateItem(element: HTMLElement, item: ConversationItemViewModel): void
     setClassName(element, `message message-${item.role}`);
     element.setAttribute('aria-label', item.role === 'user' ? 'Your message' : 'Codex response');
     renderMarkdown(requiredDescendant<HTMLElement>(element, '.message-text'), item.text);
+    updateCopyControls(element, item, turn);
     return;
   }
 
@@ -299,6 +300,35 @@ function updateItem(element: HTMLElement, item: ConversationItemViewModel): void
   if (item.detail && detail) {
     setTextContent(detail, item.detail);
   }
+}
+
+function updateCopyControls(
+  element: HTMLElement,
+  item: Extract<ConversationItemViewModel, { kind: 'message' }>,
+  turn: ConversationTurnViewModel
+): void {
+  element.querySelectorAll('.copy-control').forEach((control) => control.remove());
+  if (item.role !== 'assistant' || turn.status === 'In progress') return;
+  const response = copyButton('Copy response', turn.id, item.id);
+  element.prepend(response);
+  element.querySelectorAll<HTMLElement>('.message-text pre').forEach((pre, index) => {
+    pre.classList.add('copyable-code');
+    pre.prepend(copyButton('Copy code', turn.id, item.id, index));
+  });
+}
+
+function copyButton(label: string, turnId: string, itemId: string, codeBlockIndex?: number): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'copy-control';
+  button.dataset.action = 'copy-conversation';
+  button.dataset.turnId = turnId;
+  button.dataset.itemId = itemId;
+  if (codeBlockIndex !== undefined) button.dataset.codeBlockIndex = String(codeBlockIndex);
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.textContent = 'Copy';
+  return button;
 }
 
 function isCompatibleItemElement(

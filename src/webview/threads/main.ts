@@ -172,6 +172,10 @@ app.addEventListener('click', (event) => {
     toggleTurnBookmark(element.dataset.turnId);
     return;
   }
+  if (action === 'copy-conversation') {
+    copyConversationContent(element);
+    return;
+  }
   if (action?.startsWith('interaction-')) {
     submitInteraction(element, action.slice('interaction-'.length));
     return;
@@ -368,6 +372,9 @@ function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
       return;
     case 'threads/conversationRenameResult':
       handleConversationRenameResult(message);
+      return;
+    case 'threads/conversationCopyResult':
+      handleConversationCopyResult(message);
   }
 }
 
@@ -971,6 +978,41 @@ function toggleTurnBookmark(turnId: string | undefined): void {
     threadId: conversationThreadId,
     turnId
   });
+}
+
+function copyConversationContent(element: HTMLElement): void {
+  if (!conversationSessionId || !conversationThreadId) return;
+  const { turnId, itemId } = element.dataset;
+  if (!turnId || !itemId) return;
+  const rawIndex = element.dataset.codeBlockIndex;
+  vscode.postMessage({
+    type: 'threads/conversation/copy', sessionId: conversationSessionId,
+    threadId: conversationThreadId, turnId, itemId,
+    ...(rawIndex === undefined ? {} : { codeBlockIndex: Number(rawIndex) })
+  });
+}
+
+function handleConversationCopyResult(
+  message: Extract<ThreadsHostToWebviewMessage, { type: 'threads/conversationCopyResult' }>
+): void {
+  if (!isActiveConversation(message.sessionId, message.threadId)) return;
+  const selector = `.copy-control[data-turn-id="${cssEscape(message.turnId)}"][data-item-id="${cssEscape(message.itemId)}"]`;
+  const buttons = [...app.querySelectorAll<HTMLButtonElement>(selector)];
+  const button = buttons.find((candidate) => (
+    message.codeBlockIndex === undefined
+      ? candidate.dataset.codeBlockIndex === undefined
+      : candidate.dataset.codeBlockIndex === String(message.codeBlockIndex)
+  ));
+  if (!button) return;
+  const original = button.dataset.codeBlockIndex === undefined ? 'Copy response' : 'Copy code';
+  button.textContent = message.outcome === 'accepted' ? 'Copied' : 'Copy failed';
+  button.setAttribute('aria-label', button.textContent);
+  conversationComposerTarget?.announcer.replaceChildren(`${button.textContent}.`);
+  window.setTimeout(() => {
+    if (!button.isConnected) return;
+    button.textContent = 'Copy';
+    button.setAttribute('aria-label', original);
+  }, 2_000);
 }
 
 function jumpToTurn(turnId: string | undefined): void {
