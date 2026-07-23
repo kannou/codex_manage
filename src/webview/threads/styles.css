@@ -453,6 +453,7 @@ button.turn-bookmark-toggle:hover {
 
 .conversation-view .message-assistant {
   max-width: 100%;
+  margin-bottom: 8px;
 }
 
 .conversation-view .message-assistant,
@@ -461,7 +462,7 @@ button.turn-bookmark-toggle:hover {
 .conversation-view .copy-control {
   position: absolute;
   left: 5px;
-  bottom: 0;
+  bottom: -4px;
   width: 22px;
   height: 22px;
   padding: 3px;
