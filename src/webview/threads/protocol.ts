@@ -188,6 +188,14 @@ export type ThreadsWebviewToHostMessage =
     readonly turnId: string;
   }
   | {
+    readonly type: 'threads/conversation/copy';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly turnId: string;
+    readonly itemId: string;
+    readonly codeBlockIndex?: number;
+  }
+  | {
     readonly type: 'threads/action';
     readonly action: ThreadListAction;
     readonly threadId?: string;
@@ -243,6 +251,15 @@ export type ThreadsHostToWebviewMessage =
     readonly outcome: 'accepted' | 'rejected';
     readonly name?: string;
     readonly message?: string;
+  }
+  | {
+    readonly type: 'threads/conversationCopyResult';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly turnId: string;
+    readonly itemId: string;
+    readonly codeBlockIndex?: number;
+    readonly outcome: 'accepted' | 'rejected';
   }
   | ConversationOperationResult;
 
@@ -319,6 +336,16 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       isBoundedId(value.sessionId) &&
       isBoundedId(value.threadId) &&
       isBoundedId(value.requestId)
+    );
+  }
+  if (value.type === 'threads/conversation/copy') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId', 'itemId', 'codeBlockIndex']) &&
+      isBoundedId(value.sessionId) && isBoundedId(value.threadId) &&
+      isBoundedId(value.turnId) && isBoundedId(value.itemId) &&
+      (value.codeBlockIndex === undefined ||
+        (typeof value.codeBlockIndex === 'number' && Number.isInteger(value.codeBlockIndex) &&
+          value.codeBlockIndex >= 0 && value.codeBlockIndex < 1_000))
     );
   }
   if (value.type === 'threads/conversation/settings') {
@@ -417,6 +444,12 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
       return value.outcome === 'accepted'
         ? typeof value.name === 'string' && Boolean(value.name.trim()) && value.message === undefined
         : typeof value.message === 'string' && value.name === undefined;
+    case 'threads/conversationCopyResult':
+      return isBoundedId(value.sessionId) && isBoundedId(value.threadId) &&
+        isBoundedId(value.turnId) && isBoundedId(value.itemId) &&
+        (value.outcome === 'accepted' || value.outcome === 'rejected') &&
+        (value.codeBlockIndex === undefined ||
+          (Number.isInteger(value.codeBlockIndex) && Number(value.codeBlockIndex) >= 0));
     default:
       return false;
   }

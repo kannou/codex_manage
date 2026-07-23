@@ -9,6 +9,7 @@ const entryPoints = [
   'test/unit/codexExecutableResolver.test.mjs',
   'test/unit/dependencyDoctor.test.mjs',
   'test/unit/extensionManifest.test.mjs',
+  'test/unit/fencedCode.test.ts',
   'test/unit/jsonlTransport.test.ts',
   'test/unit/markdownRenderer.test.mjs',
   'test/unit/newConversationDefaults.test.ts',

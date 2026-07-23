@@ -49,6 +49,7 @@ import {
   type ThreadsHostToWebviewMessage
 } from '../webview/threads/protocol';
 import type { ConnectionStatus } from './threadTreeProvider';
+import { extractFencedCodeBlocks } from '../conversation/fencedCode';
 
 const ACTION_COMMANDS: Readonly<Record<ThreadListAction, string>> = {
   loadMoreActive: 'codexThreadManager.loadMoreActive',
@@ -309,6 +310,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
           case 'threads/conversation/bookmark/toggle':
             this.toggleTurnBookmark(message.sessionId, message.threadId, message.turnId);
             return;
+          case 'threads/conversation/copy':
+            void this.copyConversationContent(message);
+            return;
           case 'threads/action':
             this.executeAction(message.action, message.threadId);
         }
@@ -340,6 +344,42 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     if (!this.resolvePendingRestore() && !this.activeThread && !this.newConversationDraft) {
       this.postListState();
     }
+  }
+
+  private async copyConversationContent(
+    message: Extract<import('../webview/threads/protocol').ThreadsWebviewToHostMessage, { type: 'threads/conversation/copy' }>
+  ): Promise<void> {
+    let outcome: 'accepted' | 'rejected' = 'rejected';
+    if (this.isCurrentSession(message.sessionId, message.threadId)) {
+      const turn = this.conversationSession?.snapshot().model.turns.find(
+        (candidate) => candidate.id === message.turnId && candidate.status !== 'In progress'
+      );
+      const item = turn?.items.find(
+        (candidate) => candidate.kind === 'message' && candidate.role === 'assistant' && candidate.id === message.itemId
+      );
+      if (item?.kind === 'message') {
+        const text = message.codeBlockIndex === undefined
+          ? item.text
+          : extractFencedCodeBlocks(item.text)[message.codeBlockIndex];
+        if (text !== undefined) {
+          try {
+            await vscode.env.clipboard.writeText(text);
+            outcome = 'accepted';
+          } catch {
+            // Clipboard failures are reported in the Webview without logging conversation text.
+          }
+        }
+      }
+    }
+    this.post({
+      type: 'threads/conversationCopyResult',
+      sessionId: message.sessionId,
+      threadId: message.threadId,
+      turnId: message.turnId,
+      itemId: message.itemId,
+      ...(message.codeBlockIndex === undefined ? {} : { codeBlockIndex: message.codeBlockIndex }),
+      outcome
+    });
   }
 
   public setConnectionStatus(status: ConnectionStatus): void {

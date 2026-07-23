@@ -455,6 +455,67 @@ button.turn-bookmark-toggle:hover {
   max-width: 100%;
 }
 
+.conversation-view .message-assistant,
+.conversation-view .copyable-code { position: relative; }
+
+.conversation-view .copy-control {
+  position: absolute;
+  left: 5px;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  background: var(--vscode-sideBar-background);
+  border: 1px solid var(--vscode-button-border, var(--vscode-widget-border));
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(50%);
+  transition: opacity 80ms ease;
+}
+
+.conversation-view .copy-control-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.conversation-view .copy-success-glyph,
+.conversation-view .copy-failure-glyph {
+  display: none;
+}
+
+.conversation-view .message-assistant:hover > .copy-response-control,
+.conversation-view .message-assistant:focus-within > .copy-response-control,
+.conversation-view .copyable-code:hover > .copy-code-control,
+.conversation-view .copyable-code:focus-within > .copy-code-control,
+.conversation-view .copy-control:focus-visible {
+  opacity: 1;
+}
+
+.conversation-view .copy-control:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.conversation-view .copy-control.is-copy-success,
+.conversation-view .copy-control.is-copy-failure { opacity: 1; }
+
+.conversation-view .copy-control.is-copy-success .copy-glyph,
+.conversation-view .copy-control.is-copy-failure .copy-glyph {
+  display: none;
+}
+
+.conversation-view .copy-control.is-copy-success .copy-success-glyph,
+.conversation-view .copy-control.is-copy-failure .copy-failure-glyph {
+  display: block;
+}
+
+@media (hover: none) {
+  .conversation-view .copy-control { opacity: 0.72; }
+}
+
 .conversation-view .activity-summary {
   padding: 8px;
 }
