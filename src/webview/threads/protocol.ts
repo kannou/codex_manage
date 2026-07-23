@@ -722,17 +722,45 @@ function isConversationViewModel(value: unknown): value is ConversationViewModel
 }
 
 function isConversationTurn(value: unknown): value is ConversationTurnViewModel {
+  if (
+    !isObject(value) ||
+    !isBoundedId(value.id) ||
+    typeof value.status !== 'string' ||
+    (value.itemsView !== 'notLoaded' && value.itemsView !== 'summary' && value.itemsView !== 'full') ||
+    !isNullableFiniteNumber(value.startedAt) ||
+    !isNullableFiniteNumber(value.completedAt) ||
+    !isNullableFiniteNumber(value.durationMs) ||
+    (value.errorMessage !== null && typeof value.errorMessage !== 'string') ||
+    !Array.isArray(value.items) ||
+    !value.items.every(isConversationItem)
+  ) return false;
+  const workItemCount = value.items.filter((item) => item.kind === 'activity').length;
+  return isConversationWorkDetails(
+    value.workDetails,
+    workItemCount,
+    value.status === 'In progress'
+  );
+}
+
+function isConversationWorkDetails(
+  value: unknown,
+  workItemCount: number,
+  inProgress: boolean
+): boolean {
+  if (value === null) return inProgress || workItemCount === 0;
   return (
+    !inProgress &&
     isObject(value) &&
-    isBoundedId(value.id) &&
-    typeof value.status === 'string' &&
-    (value.itemsView === 'notLoaded' || value.itemsView === 'summary' || value.itemsView === 'full') &&
-    isNullableFiniteNumber(value.startedAt) &&
-    isNullableFiniteNumber(value.completedAt) &&
-    isNullableFiniteNumber(value.durationMs) &&
-    (value.errorMessage === null || typeof value.errorMessage === 'string') &&
-    Array.isArray(value.items) &&
-    value.items.every(isConversationItem)
+    typeof value.count === 'number' &&
+    Number.isSafeInteger(value.count) &&
+    value.count === workItemCount &&
+    workItemCount > 0 &&
+    (
+      value.status === null ||
+      value.status === 'Failed' ||
+      value.status === 'Interrupted' ||
+      value.status === 'Declined'
+    )
   );
 }
 

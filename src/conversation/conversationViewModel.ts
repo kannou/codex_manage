@@ -23,7 +23,13 @@ export interface ConversationTurnViewModel {
   readonly completedAt: number | null;
   readonly durationMs: number | null;
   readonly errorMessage: string | null;
+  readonly workDetails: ConversationWorkDetailsViewModel | null;
   readonly items: readonly ConversationItemViewModel[];
+}
+
+export interface ConversationWorkDetailsViewModel {
+  readonly count: number;
+  readonly status: 'Failed' | 'Interrupted' | 'Declined' | null;
 }
 
 export type ConversationItemViewModel =
@@ -56,6 +62,10 @@ export function toConversationViewModel(thread: Thread): ConversationViewModel {
 }
 
 function toTurnViewModel(turn: Turn): ConversationTurnViewModel {
+  const items = turn.items
+    .map((item) => toItemViewModel(item, turn.status))
+    .filter((item): item is ConversationItemViewModel => item !== null);
+  const workItemCount = items.filter((item) => item.kind === 'activity').length;
   return {
     id: turn.id,
     status: formatTurnStatus(turn.status),
@@ -64,10 +74,23 @@ function toTurnViewModel(turn: Turn): ConversationTurnViewModel {
     completedAt: toMilliseconds(turn.completedAt),
     durationMs: turn.durationMs,
     errorMessage: turn.error?.message ?? null,
-    items: turn.items
-      .map((item) => toItemViewModel(item, turn.status))
-      .filter((item): item is ConversationItemViewModel => item !== null)
+    workDetails: turn.status !== 'inProgress' && workItemCount > 0
+      ? { count: workItemCount, status: workDetailsStatus(turn) }
+      : null,
+    items
   };
+}
+
+function workDetailsStatus(turn: Turn): ConversationWorkDetailsViewModel['status'] {
+  const statuses = turn.items.flatMap((item) => (
+    'status' in item && typeof item.status === 'string' ? [item.status] : []
+  ));
+  if (turn.status === 'failed' || statuses.includes('failed')) return 'Failed';
+  if (
+    turn.status === 'interrupted' ||
+    turn.items.some((item) => item.type === 'subAgentActivity' && item.kind === 'interrupted')
+  ) return 'Interrupted';
+  return statuses.includes('declined') ? 'Declined' : null;
 }
 
 function toItemViewModel(

@@ -261,6 +261,36 @@ details .activity-summary {
   background: transparent;
 }
 
+.work-details {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--vscode-foreground);
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 4px;
+}
+
+.work-details-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  cursor: pointer;
+  background: var(--vscode-editorWidget-background);
+}
+
+.work-details-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.work-details-items {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--vscode-widget-border);
+}
+
 .status {
   flex: none;
   padding: 2px 7px;
@@ -275,6 +305,11 @@ details .activity-summary {
 .status-declined {
   color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground));
   background: var(--vscode-inputValidation-errorBackground);
+}
+
+.status-interrupted {
+  color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+  background: var(--vscode-inputValidation-warningBackground, var(--vscode-badge-background));
 }
 
 @media (max-width: 520px) {
@@ -299,6 +334,8 @@ details .activity-summary {
 @media (forced-colors: active) {
   .message,
   .activity-card,
+  .work-details,
+  .work-details-items,
   .activity-detail,
   .turn-error,
   .secondary-button {
