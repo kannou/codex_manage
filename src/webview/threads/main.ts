@@ -1005,13 +1005,17 @@ function handleConversationCopyResult(
   ));
   if (!button) return;
   const original = button.dataset.codeBlockIndex === undefined ? 'Copy response' : 'Copy code';
-  button.textContent = message.outcome === 'accepted' ? 'Copied' : 'Copy failed';
-  button.setAttribute('aria-label', button.textContent);
-  conversationComposerTarget?.announcer.replaceChildren(`${button.textContent}.`);
+  const result = message.outcome === 'accepted' ? 'Copied' : 'Copy failed';
+  button.classList.toggle('is-copy-success', message.outcome === 'accepted');
+  button.classList.toggle('is-copy-failure', message.outcome === 'rejected');
+  button.setAttribute('aria-label', result);
+  button.title = result;
+  conversationComposerTarget?.announcer.replaceChildren(`${result}.`);
   window.setTimeout(() => {
     if (!button.isConnected) return;
-    button.textContent = 'Copy';
+    button.classList.remove('is-copy-success', 'is-copy-failure');
     button.setAttribute('aria-label', original);
+    button.title = original;
   }, 2_000);
 }
 

@@ -310,10 +310,13 @@ function updateCopyControls(
   element.querySelectorAll('.copy-control').forEach((control) => control.remove());
   if (item.role !== 'assistant' || turn.status === 'In progress') return;
   const response = copyButton('Copy response', turn.id, item.id);
-  element.prepend(response);
+  response.classList.add('copy-response-control');
+  element.append(response);
   element.querySelectorAll<HTMLElement>('.message-text pre').forEach((pre, index) => {
     pre.classList.add('copyable-code');
-    pre.prepend(copyButton('Copy code', turn.id, item.id, index));
+    const code = copyButton('Copy code', turn.id, item.id, index);
+    code.classList.add('copy-code-control');
+    pre.append(code);
   });
 }
 
@@ -327,7 +330,6 @@ function copyButton(label: string, turnId: string, itemId: string, codeBlockInde
   if (codeBlockIndex !== undefined) button.dataset.codeBlockIndex = String(codeBlockIndex);
   button.setAttribute('aria-label', label);
   button.title = label;
-  button.textContent = 'Copy';
   return button;
 }
 
