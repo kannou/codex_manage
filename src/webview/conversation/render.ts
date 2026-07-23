@@ -330,7 +330,27 @@ function copyButton(label: string, turnId: string, itemId: string, codeBlockInde
   if (codeBlockIndex !== undefined) button.dataset.codeBlockIndex = String(codeBlockIndex);
   button.setAttribute('aria-label', label);
   button.title = label;
+  button.append(copyIcon());
   return button;
+}
+
+function copyIcon(): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 16 16');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.classList.add('copy-control-icon');
+  for (const [className, pathData] of [
+    ['copy-glyph', 'M5.5 1.5h7a2 2 0 0 1 2 2v7h-2v-7h-7v-2Zm-2 3h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Zm0 2v7h7v-7h-7Z'],
+    ['copy-success-glyph', 'm2.5 8.2 3.3 3.3 7.7-7.7 1 1-8.7 8.7-4.3-4.3 1-1Z'],
+    ['copy-failure-glyph', 'm3.3 2.3 4.7 4.7 4.7-4.7 1 1L9 8l4.7 4.7-1 1L8 9l-4.7 4.7-1-1L7 8 2.3 3.3l1-1Z']
+  ] as const) {
+    const path = document.createElementNS(namespace, 'path');
+    path.setAttribute('d', pathData);
+    path.classList.add(className);
+    icon.append(path);
+  }
+  return icon;
 }
 
 function isCompatibleItemElement(

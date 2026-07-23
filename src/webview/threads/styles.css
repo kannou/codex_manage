@@ -460,7 +460,7 @@ button.turn-bookmark-toggle:hover {
 
 .conversation-view .copy-control {
   position: absolute;
-  right: 5px;
+  left: 5px;
   bottom: 0;
   width: 22px;
   height: 22px;
@@ -475,13 +475,16 @@ button.turn-bookmark-toggle:hover {
   transition: opacity 80ms ease;
 }
 
-.conversation-view .copy-control::before {
+.conversation-view .copy-control-icon {
   display: block;
   width: 14px;
   height: 14px;
-  background: currentColor;
-  content: '';
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 4V1h9a2 2 0 0 1 2 2v9h-3v3H3a2 2 0 0 1-2-2V4h3Zm1 0h5a2 2 0 0 1 2 2v5h2V3a1 1 0 0 0-1-1H5v2Zm5 1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  fill: currentColor;
+}
+
+.conversation-view .copy-success-glyph,
+.conversation-view .copy-failure-glyph {
+  display: none;
 }
 
 .conversation-view .message-assistant:hover > .copy-response-control,
@@ -499,12 +502,14 @@ button.turn-bookmark-toggle:hover {
 .conversation-view .copy-control.is-copy-success,
 .conversation-view .copy-control.is-copy-failure { opacity: 1; }
 
-.conversation-view .copy-control.is-copy-success::before {
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m6.5 12.4-4-4 .9-.8 3.1 3.1 6.1-6.1.9.8-7 7Z'/%3E%3C/svg%3E");
+.conversation-view .copy-control.is-copy-success .copy-glyph,
+.conversation-view .copy-control.is-copy-failure .copy-glyph {
+  display: none;
 }
 
-.conversation-view .copy-control.is-copy-failure::before {
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4.1 3.3 3.9 3.9 3.9-3.9.8.8L8.8 8l3.9 3.9-.8.8L8 8.8l-3.9 3.9-.8-.8L7.2 8 3.3 4.1l.8-.8Z'/%3E%3C/svg%3E");
+.conversation-view .copy-control.is-copy-success .copy-success-glyph,
+.conversation-view .copy-control.is-copy-failure .copy-failure-glyph {
+  display: block;
 }
 
 @media (hover: none) {
