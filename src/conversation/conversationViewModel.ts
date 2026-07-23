@@ -2,6 +2,11 @@ import type { Thread } from '../codex/protocol/generated/v2/Thread';
 import type { ThreadItem } from '../codex/protocol/generated/v2/ThreadItem';
 import type { Turn } from '../codex/protocol/generated/v2/Turn';
 import type { UserInput } from '../codex/protocol/generated/v2/UserInput';
+import {
+  resolveConversationChangedFiles,
+  type ConversationChangedFileViewModel,
+  type ConversationWorkspaceFolder
+} from './conversationChangedFiles';
 
 const MAX_DETAIL_LENGTH = 20_000;
 
@@ -24,6 +29,7 @@ export interface ConversationTurnViewModel {
   readonly durationMs: number | null;
   readonly errorMessage: string | null;
   readonly workDetails: ConversationWorkDetailsViewModel | null;
+  readonly changedFiles: readonly ConversationChangedFileViewModel[];
   readonly items: readonly ConversationItemViewModel[];
 }
 
@@ -49,7 +55,11 @@ export type ConversationItemViewModel =
     readonly detailPresentation: 'inline' | 'collapsible';
   };
 
-export function toConversationViewModel(thread: Thread): ConversationViewModel {
+export function toConversationViewModel(
+  thread: Thread,
+  workspaceFolders: readonly ConversationWorkspaceFolder[] = []
+): ConversationViewModel {
+  const changedFiles = resolveConversationChangedFiles(thread, workspaceFolders);
   return {
     threadId: thread.id,
     title: firstNonEmpty(thread.name, firstLine(thread.preview), 'Untitled thread'),
@@ -57,11 +67,22 @@ export function toConversationViewModel(thread: Thread): ConversationViewModel {
     status: formatThreadStatus(thread.status.type),
     updatedAt: thread.updatedAt * 1_000,
     isPartialHistory: thread.turns.some((turn) => turn.itemsView !== 'full'),
-    turns: thread.turns.map(toTurnViewModel)
+    turns: thread.turns.map((turn) => toTurnViewModel(
+      turn,
+      (changedFiles.get(turn.id) ?? []).map(({ id, path, change, canOpen }) => ({
+        id,
+        path,
+        change,
+        canOpen
+      }))
+    ))
   };
 }
 
-function toTurnViewModel(turn: Turn): ConversationTurnViewModel {
+function toTurnViewModel(
+  turn: Turn,
+  changedFiles: readonly ConversationChangedFileViewModel[]
+): ConversationTurnViewModel {
   const items = turn.items
     .map((item) => toItemViewModel(item, turn.status))
     .filter((item): item is ConversationItemViewModel => item !== null);
@@ -77,6 +98,7 @@ function toTurnViewModel(turn: Turn): ConversationTurnViewModel {
     workDetails: turn.status !== 'inProgress' && workItemCount > 0
       ? { count: workItemCount, status: workDetailsStatus(turn) }
       : null,
+    changedFiles,
     items
   };
 }

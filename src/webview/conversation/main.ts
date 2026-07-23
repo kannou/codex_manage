@@ -35,6 +35,17 @@ reloadButton.addEventListener('click', () => {
   vscode.postMessage({ type: 'conversation/reload' });
 });
 
+target.content.addEventListener('click', (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLElement>(
+    '[data-action="open-changed-file"]'
+  );
+  const turnId = button?.dataset.turnId;
+  const fileId = button?.dataset.fileId;
+  if (turnId && fileId) {
+    vscode.postMessage({ type: 'conversation/openChangedFile', turnId, fileId });
+  }
+});
+
 window.addEventListener('message', (event: MessageEvent<unknown>) => {
   if (!isConversationHostMessage(event.data)) {
     return;

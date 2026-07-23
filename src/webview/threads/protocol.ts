@@ -196,6 +196,13 @@ export type ThreadsWebviewToHostMessage =
     readonly codeBlockIndex?: number;
   }
   | {
+    readonly type: 'threads/conversation/openChangedFile';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly turnId: string;
+    readonly fileId: string;
+  }
+  | {
     readonly type: 'threads/action';
     readonly action: ThreadListAction;
     readonly threadId?: string;
@@ -346,6 +353,15 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       (value.codeBlockIndex === undefined ||
         (typeof value.codeBlockIndex === 'number' && Number.isInteger(value.codeBlockIndex) &&
           value.codeBlockIndex >= 0 && value.codeBlockIndex < 1_000))
+    );
+  }
+  if (value.type === 'threads/conversation/openChangedFile') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId', 'fileId']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      isBoundedId(value.turnId) &&
+      isBoundedId(value.fileId)
     );
   }
   if (value.type === 'threads/conversation/settings') {
@@ -731,6 +747,11 @@ function isConversationTurn(value: unknown): value is ConversationTurnViewModel 
     !isNullableFiniteNumber(value.completedAt) ||
     !isNullableFiniteNumber(value.durationMs) ||
     (value.errorMessage !== null && typeof value.errorMessage !== 'string') ||
+    !Array.isArray(value.changedFiles) ||
+    value.changedFiles.length > 10_000 ||
+    !value.changedFiles.every(isConversationChangedFile) ||
+    new Set(value.changedFiles.map((file) => file.id)).size !== value.changedFiles.length ||
+    ((value.status === 'In progress' || value.itemsView !== 'full') && value.changedFiles.length > 0) ||
     !Array.isArray(value.items) ||
     !value.items.every(isConversationItem)
   ) return false;
@@ -739,6 +760,29 @@ function isConversationTurn(value: unknown): value is ConversationTurnViewModel 
     value.workDetails,
     workItemCount,
     value.status === 'In progress'
+  );
+}
+
+function isConversationChangedFile(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    isBoundedId(value.id) &&
+    typeof value.path === 'string' &&
+    Boolean(value.path) &&
+    value.path.length <= 2_000 &&
+    !value.path.includes('\0') &&
+    !value.path.startsWith('/') &&
+    !value.path.startsWith('\\') &&
+    !/^[a-z]:[\\/]/iu.test(value.path) &&
+    !value.path.split(/[\\/]/u).includes('..') &&
+    (
+      value.change === 'Added' ||
+      value.change === 'Updated' ||
+      value.change === 'Deleted' ||
+      value.change === 'Moved'
+    ) &&
+    typeof value.canOpen === 'boolean' &&
+    value.canOpen === (value.change !== 'Deleted')
   );
 }
 

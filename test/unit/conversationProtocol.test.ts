@@ -28,6 +28,17 @@ test('rejects arbitrary webview commands and malformed host messages', () => {
   assert.equal(isConversationWebviewMessage({ type: 'conversation/ready' }), true);
   assert.equal(isConversationWebviewMessage({ type: 'conversation/reload' }), true);
   assert.equal(isConversationWebviewMessage({
+    type: 'conversation/openChangedFile',
+    turnId: 'turn-1',
+    fileId: 'changed-file-1'
+  }), true);
+  assert.equal(isConversationWebviewMessage({
+    type: 'conversation/openChangedFile',
+    turnId: 'turn-1',
+    fileId: 'changed-file-1',
+    path: '/private/file'
+  }), false);
+  assert.equal(isConversationWebviewMessage({
     type: 'conversation/execute',
     command: 'anything'
   }), false);

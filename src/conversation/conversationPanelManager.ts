@@ -13,6 +13,10 @@ import {
   type ConversationHostToWebviewMessage,
   type ConversationWebviewState
 } from '../webview/conversation/protocol';
+import {
+  resolveConversationChangedFiles,
+  type ConversationWorkspaceFolder
+} from './conversationChangedFiles';
 
 export const CONVERSATION_VIEW_TYPE = 'codexThreadManager.conversation';
 
@@ -109,6 +113,7 @@ class ManagedConversationPanel {
   private ready = false;
   private disposed = false;
   private reference: ConversationThreadReference;
+  private thread: Thread | undefined;
 
   public constructor(
     private readonly panel: vscode.WebviewPanel,
@@ -131,6 +136,10 @@ class ManagedConversationPanel {
           this.options.logger.appendLine(
             `[conversation] Ignored an invalid webview message for thread ${this.reference.id}.`
           );
+          return;
+        }
+        if (message.type === 'conversation/openChangedFile') {
+          void this.openChangedFile(message.turnId, message.fileId);
           return;
         }
         this.ready = true;
@@ -166,7 +175,8 @@ class ManagedConversationPanel {
         if (this.disposed || generation !== this.generation) {
           return;
         }
-        const model = toConversationViewModel(thread);
+        this.thread = thread;
+        const model = toConversationViewModel(thread, currentConversationWorkspaceFolders());
         this.reference = { id: model.threadId, title: model.title };
         this.panel.title = model.title;
         await this.post({ type: 'conversation/loaded', model });
@@ -195,6 +205,22 @@ class ManagedConversationPanel {
     this.disposeListeners();
   }
 
+  private async openChangedFile(turnId: string, fileId: string): Promise<void> {
+    const file = this.thread
+      ? resolveConversationChangedFiles(this.thread, currentConversationWorkspaceFolders())
+        .get(turnId)
+        ?.find((candidate) => candidate.id === fileId && candidate.canOpen)
+      : undefined;
+    if (!file) return;
+    try {
+      await vscode.window.showTextDocument(vscode.Uri.file(file.absolutePath));
+    } catch (error) {
+      this.options.logger.appendLine(
+        `[conversation] Could not open a changed file for thread ${this.reference.id}: ${asError(error).message}`
+      );
+    }
+  }
+
   private webviewState(): ConversationWebviewState {
     return {
       version: 1,
@@ -212,6 +238,13 @@ class ManagedConversationPanel {
       this.disposables.pop()?.dispose();
     }
   }
+}
+
+function currentConversationWorkspaceFolders(): readonly ConversationWorkspaceFolder[] {
+  return (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
+    path: folder.uri.fsPath,
+    name: folder.name
+  }));
 }
 
 export function conversationErrorMessage(error: unknown): string {

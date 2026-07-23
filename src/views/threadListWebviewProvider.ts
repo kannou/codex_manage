@@ -50,6 +50,7 @@ import {
 } from '../webview/threads/protocol';
 import type { ConnectionStatus } from './threadTreeProvider';
 import { extractFencedCodeBlocks } from '../conversation/fencedCode';
+import type { ConversationWorkspaceFolder } from '../conversation/conversationChangedFiles';
 
 const ACTION_COMMANDS: Readonly<Record<ThreadListAction, string>> = {
   loadMoreActive: 'codexThreadManager.loadMoreActive',
@@ -313,6 +314,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
           case 'threads/conversation/copy':
             void this.copyConversationContent(message);
             return;
+          case 'threads/conversation/openChangedFile':
+            void this.openConversationChangedFile(message);
+            return;
           case 'threads/action':
             this.executeAction(message.action, message.threadId);
         }
@@ -380,6 +384,24 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       ...(message.codeBlockIndex === undefined ? {} : { codeBlockIndex: message.codeBlockIndex }),
       outcome
     });
+  }
+
+  private async openConversationChangedFile(
+    message: Extract<
+      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      { type: 'threads/conversation/openChangedFile' }
+    >
+  ): Promise<void> {
+    if (!this.isCurrentSession(message.sessionId, message.threadId)) return;
+    const path = this.conversationSession?.resolveChangedFile(message.turnId, message.fileId);
+    if (!path) return;
+    try {
+      await vscode.window.showTextDocument(vscode.Uri.file(path));
+    } catch (error) {
+      this.options.logger.appendLine(
+        `[threads] Could not open a changed file for sidebar thread ${message.threadId}: ${asError(error).message}`
+      );
+    }
   }
 
   public setConnectionStatus(status: ConnectionStatus): void {
@@ -685,7 +707,11 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
           return;
         }
 
-        const session = new ConversationSession(this.options.conversationClient, thread);
+        const session = new ConversationSession(
+          this.options.conversationClient,
+          thread,
+          currentConversationWorkspaceFolders()
+        );
         for (const buffered of pendingLoad.notifications) {
           session.applyNotification(buffered);
         }
@@ -1373,7 +1399,11 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     thread: Thread,
     turnStarted: boolean
   ): void {
-    const session = new ConversationSession(this.options.conversationClient, thread);
+    const session = new ConversationSession(
+      this.options.conversationClient,
+      thread,
+      currentConversationWorkspaceFolders()
+    );
     session.initializeRuntimeSettings(
       draft.models,
       started.model,
@@ -1749,6 +1779,13 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       this.viewDisposables.pop()?.dispose();
     }
   }
+}
+
+function currentConversationWorkspaceFolders(): readonly ConversationWorkspaceFolder[] {
+  return (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
+    path: folder.uri.fsPath,
+    name: folder.name
+  }));
 }
 
 export function newConversationPermissions(permission: NewConversationDefaults['permission'] | undefined): {

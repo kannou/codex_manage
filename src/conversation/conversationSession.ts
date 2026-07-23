@@ -33,6 +33,10 @@ import {
   toConversationViewModel,
   type ConversationViewModel
 } from './conversationViewModel';
+import {
+  resolveConversationChangedFiles,
+  type ConversationWorkspaceFolder
+} from './conversationChangedFiles';
 
 export interface ConversationSessionClient {
   resumeThread(params: ThreadResumeParams): Promise<ThreadResumeResponse>;
@@ -140,7 +144,8 @@ export class ConversationSession {
 
   public constructor(
     private readonly client: ConversationSessionClient,
-    initialThread: Thread
+    initialThread: Thread,
+    private readonly workspaceFolders: readonly ConversationWorkspaceFolder[] = []
   ) {
     this.reducer = createConversationReducerState(initialThread);
     this.sync = this.reducer.needsResync ? 'stale' : 'ready';
@@ -162,7 +167,7 @@ export class ConversationSession {
 
   public snapshot(): ConversationSessionSnapshot {
     return {
-      model: toConversationViewModel(this.reducer.thread),
+      model: toConversationViewModel(this.reducer.thread, this.workspaceFolders),
       revision: this.revision,
       sync: this.sync,
       operation: this.operation,
@@ -170,6 +175,13 @@ export class ConversationSession {
       notice: this.notice,
       runtime: this.runtime
     };
+  }
+
+  public resolveChangedFile(turnId: string, fileId: string): string | undefined {
+    return resolveConversationChangedFiles(this.reducer.thread, this.workspaceFolders)
+      .get(turnId)
+      ?.find((file) => file.id === fileId && file.canOpen)
+      ?.absolutePath;
   }
 
   public async loadRuntimeSettings(): Promise<boolean> {

@@ -29,6 +29,7 @@ const conversationState = {
         durationMs: null,
         errorMessage: null,
         workDetails: null,
+        changedFiles: [],
         items: [
           { kind: 'message', id: 'message-1', role: 'assistant', text: 'Hello' }
         ]
@@ -100,6 +101,14 @@ test('accepts bounded composer actions and rejects arbitrary conversation payloa
     type: 'threads/conversation/copy', sessionId: 'session-1', threadId: 'thread-1',
     turnId: 'turn-1', itemId: 'message-1', codeBlockIndex: 0
   }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/openChangedFile', sessionId: 'session-1', threadId: 'thread-1',
+    turnId: 'turn-1', fileId: 'changed-file-1'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/openChangedFile', sessionId: 'session-1', threadId: 'thread-1',
+    turnId: 'turn-1', fileId: 'changed-file-1', path: 'D:\\private\\file.ts'
+  }), false);
   assert.equal(isThreadsWebviewMessage({
     type: 'threads/conversation/copy', sessionId: 'session-1', threadId: 'thread-1',
     turnId: 'turn-1', itemId: 'message-1', codeBlockIndex: -1, command: 'clipboard.write'
@@ -326,7 +335,33 @@ test('validates persisted navigation state and host messages', () => {
         turns: [{
           ...conversationState.model.turns[0],
           status: 'Completed',
+          changedFiles: [{
+            id: 'changed-file-1',
+            path: 'D:\\private\\example.ts',
+            change: 'Updated',
+            canOpen: true
+          }]
+        }]
+      },
+      execution: { kind: 'idle' }
+    }
+  }), false);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: {
+      ...conversationState,
+      model: {
+        ...conversationState.model,
+        turns: [{
+          ...conversationState.model.turns[0],
+          status: 'Completed',
           workDetails: { count: 1, status: 'Failed' },
+          changedFiles: [{
+            id: 'changed-file-1',
+            path: 'src/example.ts',
+            change: 'Updated',
+            canOpen: true
+          }],
           items: [{
             kind: 'activity',
             id: 'command-1',

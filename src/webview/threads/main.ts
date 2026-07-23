@@ -176,6 +176,10 @@ app.addEventListener('click', (event) => {
     copyConversationContent(element);
     return;
   }
+  if (action === 'open-changed-file') {
+    openChangedFile(element);
+    return;
+  }
   if (action?.startsWith('interaction-')) {
     submitInteraction(element, action.slice('interaction-'.length));
     return;
@@ -989,6 +993,19 @@ function copyConversationContent(element: HTMLElement): void {
     type: 'threads/conversation/copy', sessionId: conversationSessionId,
     threadId: conversationThreadId, turnId, itemId,
     ...(rawIndex === undefined ? {} : { codeBlockIndex: Number(rawIndex) })
+  });
+}
+
+function openChangedFile(element: HTMLElement): void {
+  if (!conversationSessionId || !conversationThreadId) return;
+  const { turnId, fileId } = element.dataset;
+  if (!turnId || !fileId) return;
+  vscode.postMessage({
+    type: 'threads/conversation/openChangedFile',
+    sessionId: conversationSessionId,
+    threadId: conversationThreadId,
+    turnId,
+    fileId
   });
 }
 
