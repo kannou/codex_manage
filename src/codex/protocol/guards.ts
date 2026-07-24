@@ -16,6 +16,7 @@ import type { Turn } from './generated/v2/Turn';
 import type { TurnError } from './generated/v2/TurnError';
 import type { TurnInterruptResponse } from './generated/v2/TurnInterruptResponse';
 import type { TurnStartResponse } from './generated/v2/TurnStartResponse';
+import type { GetAccountRateLimitsResponse } from './generated/v2/GetAccountRateLimitsResponse';
 
 type ConversationNotificationMethod =
   | 'error'
@@ -42,6 +43,45 @@ export interface ConversationConfigDefaults {
   readonly sandbox: SandboxMode | null;
   readonly approvalPolicy: AskForApproval | null;
   readonly approvalsReviewer: ApprovalsReviewer | null;
+}
+
+export function parseAccountRateLimitsResponse(value: unknown): GetAccountRateLimitsResponse {
+  if (!isJsonObject(value) || !isRateLimitSnapshot(value.rateLimits) ||
+      !(value.rateLimitsByLimitId === null || (isJsonObject(value.rateLimitsByLimitId) &&
+        Object.values(value.rateLimitsByLimitId).every((item) => item === undefined || isRateLimitSnapshot(item))))) {
+    throw new Error('App Server returned an invalid account/rateLimits/read response.');
+  }
+  return value as unknown as GetAccountRateLimitsResponse;
+}
+
+export function parseRateLimitSnapshot(value: unknown): GetAccountRateLimitsResponse['rateLimits'] {
+  if (!isRateLimitSnapshot(value)) throw new Error('App Server returned invalid rate limit data.');
+  return value;
+}
+
+function isRateLimitSnapshot(value: unknown): value is GetAccountRateLimitsResponse['rateLimits'] {
+  return isJsonObject(value) && isNullableString(value.limitId) && isNullableString(value.limitName) &&
+    isRateLimitWindow(value.primary) && isRateLimitWindow(value.secondary) &&
+    (value.credits === null || (isJsonObject(value.credits) && typeof value.credits.hasCredits === 'boolean' &&
+      typeof value.credits.unlimited === 'boolean' && isNullableString(value.credits.balance))) &&
+    (value.individualLimit === null || (isJsonObject(value.individualLimit) &&
+      typeof value.individualLimit.limit === 'string' && typeof value.individualLimit.used === 'string' &&
+      isPercentage(value.individualLimit.remainingPercent) && isValidEpoch(value.individualLimit.resetsAt)));
+}
+
+function isRateLimitWindow(value: unknown): boolean {
+  return value === null || (isJsonObject(value) && isPercentage(value.usedPercent) &&
+    isNullableFiniteNumber(value.windowDurationMins) &&
+    (value.windowDurationMins === null || value.windowDurationMins > 0) &&
+    (value.resetsAt === null || isValidEpoch(value.resetsAt)));
+}
+
+function isPercentage(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0 && value <= 100;
+}
+
+function isValidEpoch(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0 && Number.isFinite(new Date(value * 1000).getTime());
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {

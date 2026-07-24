@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   parseConversationNotification,
   parseConversationConfigDefaults,
+  parseAccountRateLimitsResponse,
   parseInitializeResponse,
   parseModelListResponse,
   parseSkillsListResponse,
@@ -13,6 +14,26 @@ import {
 import { createThread, createTurn } from '../support/threadFixture';
 
 const validThread = createThread();
+
+test('validates account usage percentages and reset timestamps', () => {
+  const snapshot = {
+    limitId: 'codex', limitName: null,
+    primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1_750_000_000 },
+    secondary: null, credits: { hasCredits: true, unlimited: false, balance: '12.50' },
+    individualLimit: null, planType: null, rateLimitReachedType: null
+  };
+  assert.equal(parseAccountRateLimitsResponse({
+    rateLimits: snapshot, rateLimitsByLimitId: null, rateLimitResetCredits: null
+  }).rateLimits.primary?.usedPercent, 25);
+  assert.throws(() => parseAccountRateLimitsResponse({
+    rateLimits: { ...snapshot, primary: { ...snapshot.primary, usedPercent: 101 } },
+    rateLimitsByLimitId: null, rateLimitResetCredits: null
+  }), /invalid account\/rateLimits\/read response/u);
+  assert.throws(() => parseAccountRateLimitsResponse({
+    rateLimits: { ...snapshot, primary: { ...snapshot.primary, resetsAt: Number.NaN } },
+    rateLimitsByLimitId: null, rateLimitResetCredits: null
+  }), /invalid account\/rateLimits\/read response/u);
+});
 
 test('accepts valid initialize and thread/list boundaries', () => {
   assert.equal(parseInitializeResponse({

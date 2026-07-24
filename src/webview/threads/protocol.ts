@@ -84,6 +84,14 @@ export interface ConversationScreenState {
   readonly notice?: string;
 }
 
+export interface UsageSnapshot {
+  readonly primary: UsageWindow | null;
+  readonly secondary: UsageWindow | null;
+  readonly credits: { readonly unlimited: boolean; readonly balance: string | null } | null;
+  readonly individualLimit: { readonly limit: string; readonly used: string; readonly remainingPercent: number; readonly resetsAt: number } | null;
+}
+export interface UsageWindow { readonly remainingPercent: number; readonly resetsAt: number | null }
+
 export type ConversationAdditionKind = 'localImage' | 'mention' | 'skill';
 
 export type ConversationAttachmentViewModel = {
@@ -131,6 +139,7 @@ export type ThreadsWebviewToHostMessage =
   | { readonly type: 'threads/open'; readonly threadId: string }
   | { readonly type: 'threads/back' }
   | { readonly type: 'threads/reload' }
+  | { readonly type: 'threads/conversation/usage/read' }
   | {
     readonly type: 'threads/conversation/rename';
     readonly sessionId: string;
@@ -231,6 +240,7 @@ export type ThreadsHostToWebviewMessage =
     readonly hasWorkspace: boolean;
   }
   | { readonly type: 'threads/showList' }
+  | { readonly type: 'threads/conversationUsage'; readonly status: 'loading' | 'ready' | 'unavailable'; readonly usage?: UsageSnapshot }
   | {
     readonly type: 'threads/focusConversationPrompt';
     readonly sessionId: string;
@@ -322,8 +332,9 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
   if (!isObject(value) || typeof value.type !== 'string') {
     return false;
   }
-  if (value.type === 'threads/ready' || value.type === 'threads/back' || value.type === 'threads/reload') {
-    return true;
+  if (value.type === 'threads/ready' || value.type === 'threads/back' || value.type === 'threads/reload' ||
+      value.type === 'threads/conversation/usage/read') {
+    return hasOnlyKeys(value, ['type']);
   }
   if (value.type === 'threads/viewFocus') {
     return hasOnlyKeys(value, ['type', 'focused']) && typeof value.focused === 'boolean';
@@ -461,6 +472,9 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
   switch (value.type) {
     case 'threads/showList':
       return true;
+    case 'threads/conversationUsage':
+      return (value.status === 'loading' || value.status === 'unavailable' ||
+        (value.status === 'ready' && isUsageSnapshot(value.usage)));
     case 'threads/focusConversationPrompt':
       return (
         hasOnlyKeys(value, ['type', 'sessionId', 'threadId']) &&
@@ -504,6 +518,22 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
     default:
       return false;
   }
+}
+
+function isUsageSnapshot(value: unknown): boolean {
+  return isObject(value) && isUsageWindow(value.primary) && isUsageWindow(value.secondary) &&
+    (value.credits === null || (isObject(value.credits) && typeof value.credits.unlimited === 'boolean' &&
+      (value.credits.balance === null || typeof value.credits.balance === 'string'))) &&
+    (value.individualLimit === null || (isObject(value.individualLimit) && typeof value.individualLimit.limit === 'string' &&
+      typeof value.individualLimit.used === 'string' && isPercent(value.individualLimit.remainingPercent) &&
+      typeof value.individualLimit.resetsAt === 'number'));
+}
+function isUsageWindow(value: unknown): boolean {
+  return value === null || (isObject(value) && isPercent(value.remainingPercent) &&
+    (value.resetsAt === null || typeof value.resetsAt === 'number'));
+}
+function isPercent(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
 }
 
 export function isConversationScreenState(value: unknown): value is ConversationScreenState {
