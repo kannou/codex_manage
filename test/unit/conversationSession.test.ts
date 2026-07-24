@@ -81,6 +81,36 @@ function commandExecution(
   };
 }
 
+function fileChange(
+  id: string,
+  status: Extract<ThreadItem, { type: 'fileChange' }>['status']
+): Extract<ThreadItem, { type: 'fileChange' }> {
+  return { type: 'fileChange', id, changes: [], status };
+}
+
+function webSearch(id: string): Extract<ThreadItem, { type: 'webSearch' }> {
+  return { type: 'webSearch', id, query: 'current documentation', action: null };
+}
+
+function mcpToolCall(
+  id: string,
+  status: Extract<ThreadItem, { type: 'mcpToolCall' }>['status']
+): Extract<ThreadItem, { type: 'mcpToolCall' }> {
+  return {
+    type: 'mcpToolCall',
+    id,
+    server: 'fixture',
+    tool: 'lookup',
+    status,
+    arguments: {},
+    appContext: null,
+    pluginId: null,
+    result: null,
+    error: status === 'failed' ? { message: 'Lookup failed' } : null,
+    durationMs: status === 'inProgress' ? null : 10
+  };
+}
+
 test('resumes before starting a text turn and locks concurrent sends', async () => {
   const resume = deferred<ThreadResumeResponse>();
   const start = deferred<{ turn: Turn }>();
@@ -201,7 +231,7 @@ test('applies streaming deltas and converges on the completed turn snapshot', ()
   assert.equal(session.snapshot().operation, 'idle');
 });
 
-test('keeps a completed command until the next command or visible Codex response', () => {
+test('keeps a completed command until the next visible activity starts', () => {
   const session = new ConversationSession(passiveClient(), createThread());
   const turn = liveTurn();
   session.applyNotification({
@@ -256,22 +286,20 @@ test('keeps a completed command until the next command or visible Codex response
       delta: 'Checking'
     }
   });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('command-first'), false);
+
   session.applyNotification({
     method: 'item/started',
     params: {
       threadId: 'thread-1',
       turnId: turn.id,
-      item: {
-        type: 'fileChange',
-        id: 'file-live',
-        changes: [],
-        status: 'inProgress'
-      },
+      item: fileChange('file-live', 'inProgress'),
       startedAtMs: 4
     }
   });
   snapshot = session.snapshot().model.turns[0];
-  assert.equal(snapshot?.liveItemIds?.includes('command-first'), true);
+  assert.equal(snapshot?.liveItemIds?.includes('command-first'), false);
 
   session.applyNotification({
     method: 'item/agentMessage/delta',
@@ -322,6 +350,106 @@ test('keeps a completed command until the next command or visible Codex response
   snapshot = session.snapshot().model.turns[0];
   assert.equal(snapshot?.liveItemIds?.includes('command-second'), false);
   assert.equal(snapshot?.liveItemIds?.includes('command-third'), true);
+});
+
+test('replaces completed transient cards across activity types and retains failures', () => {
+  const session = new ConversationSession(passiveClient(), createThread());
+  const turn = liveTurn();
+  session.applyNotification({
+    method: 'turn/started',
+    params: { threadId: 'thread-1', turn }
+  });
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: fileChange('file-first', 'inProgress'),
+      startedAtMs: 1
+    }
+  });
+  session.applyNotification({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: fileChange('file-first', 'completed'),
+      completedAtMs: 2
+    }
+  });
+
+  let snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('file-first'), true);
+
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: webSearch('web-next'),
+      startedAtMs: 3
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('file-first'), false);
+  assert.equal(snapshot?.liveItemIds?.includes('web-next'), true);
+
+  session.applyNotification({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: webSearch('web-next'),
+      completedAtMs: 4
+    }
+  });
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: mcpToolCall('mcp-failed', 'inProgress'),
+      startedAtMs: 5
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('web-next'), false);
+
+  session.applyNotification({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: mcpToolCall('mcp-failed', 'failed'),
+      completedAtMs: 6
+    }
+  });
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: commandExecution('command-after-failure', 'inProgress'),
+      startedAtMs: 7
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('mcp-failed'), true);
+  assert.equal(snapshot?.liveItemIds?.includes('command-after-failure'), true);
+
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: fileChange('file-parallel', 'inProgress'),
+      startedAtMs: 8
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('mcp-failed'), true);
+  assert.equal(snapshot?.liveItemIds?.includes('command-after-failure'), true);
+  assert.equal(snapshot?.liveItemIds?.includes('file-parallel'), true);
 });
 
 test('keeps streamed text visible and uses one convergence workflow for duplicate completion', async () => {

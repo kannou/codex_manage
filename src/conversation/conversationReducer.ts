@@ -17,7 +17,8 @@ interface ItemState {
 export interface ConversationReducerState {
   readonly thread: Thread;
   readonly items: ReadonlyMap<string, ItemState>;
-  readonly lingeringCompletedCommandIds: ReadonlySet<string>;
+  readonly hiddenTransientActivityIds: ReadonlySet<string>;
+  readonly lingeringCompletedActivityIds: ReadonlySet<string>;
   readonly needsResync: boolean;
 }
 
@@ -48,10 +49,11 @@ export function createConversationReducerState(thread: Thread): ConversationRedu
     }
   }
 
+  const activityVisibility = deriveActivityVisibility(thread);
   return {
     thread,
     items,
-    lingeringCompletedCommandIds: deriveLingeringCompletedCommandIds(thread),
+    ...activityVisibility,
     needsResync: needsResync ||
       activeTurns > 1 ||
       (activeTurns > 0 && thread.status.type !== 'active')
@@ -168,21 +170,13 @@ function reduceTurnStarted(
   const thread = upsertTurn(state.thread, merged);
   const activeCount = thread.turns.filter((turn) => turn.status === 'inProgress').length;
   const existingItems = new Map(existing?.items.map((item) => [item.id, item]) ?? []);
-  const startsNextActivity = incoming.items.some((item) => {
-    const current = existingItems.get(item.id);
-    if (item.type === 'commandExecution') {
-      return current === undefined;
-    }
-    return item.type === 'agentMessage' &&
-      item.text.trim().length > 0 &&
-      (current?.type !== 'agentMessage' || current.text.trim().length === 0);
-  });
+  const startsNextActivity = incoming.items.some((item) =>
+    isNewVisibleActivity(item, existingItems.get(item.id))
+  );
   return {
     thread,
     items,
-    lingeringCompletedCommandIds: startsNextActivity
-      ? clearLingeringCompletedCommands(state)
-      : state.lingeringCompletedCommandIds,
+    ...(startsNextActivity ? hideLingeringCompletedActivities(state) : activityVisibility(state)),
     needsResync: state.needsResync || incoming.status !== 'inProgress' || activeCount > 1
   };
 }
@@ -210,7 +204,8 @@ function reduceTurnCompleted(
   return {
     thread: upsertTurn(state.thread, completed),
     items: replaceTurnItemStates(state.items, incoming.id, completed.items, 'completed'),
-    lingeringCompletedCommandIds: new Set(),
+    hiddenTransientActivityIds: new Set(),
+    lingeringCompletedActivityIds: new Set(),
     needsResync: state.needsResync || !isTerminalTurn(incoming)
   };
 }
@@ -240,11 +235,9 @@ function reduceItemStarted(
   return {
     thread: upsertTurn(state.thread, updatedTurn),
     items,
-    lingeringCompletedCommandIds:
-      incoming.type === 'commandExecution' ||
-      (incoming.type === 'agentMessage' && incoming.text.trim().length > 0)
-        ? clearLingeringCompletedCommands(state)
-        : state.lingeringCompletedCommandIds,
+    ...(isNewVisibleActivity(incoming, current)
+      ? hideLingeringCompletedActivities(state)
+      : activityVisibility(state)),
     needsResync: state.needsResync || conflict
   };
 }
@@ -271,25 +264,31 @@ function reduceItemCompleted(
   }
   const items = new Map(state.items);
   items.set(incoming.id, { turnId, lifecycle: 'completed' });
-  let lingeringCompletedCommandIds = state.lingeringCompletedCommandIds;
-  if (incoming.type === 'commandExecution') {
-    if (!current) {
-      lingeringCompletedCommandIds = clearLingeringCompletedCommands(state);
-    }
-    const nextIds = new Set(lingeringCompletedCommandIds);
-    if (incoming.status === 'completed') {
-      nextIds.add(incoming.id);
+  const startsNextActivity = isNewVisibleActivity(incoming, current);
+  let visibility = startsNextActivity
+    ? hideLingeringCompletedActivities(state)
+    : activityVisibility(state);
+  if (isTransientActivity(incoming)) {
+    const hiddenIds = new Set(visibility.hiddenTransientActivityIds);
+    const lingeringIds = new Set(visibility.lingeringCompletedActivityIds);
+    if (isSuccessfulTransientActivity(incoming)) {
+      if (owner?.lifecycle !== 'completed') {
+        hiddenIds.delete(incoming.id);
+        lingeringIds.add(incoming.id);
+      }
     } else {
-      nextIds.delete(incoming.id);
+      hiddenIds.delete(incoming.id);
+      lingeringIds.delete(incoming.id);
     }
-    lingeringCompletedCommandIds = nextIds;
-  } else if (incoming.type === 'agentMessage' && incoming.text.trim().length > 0) {
-    lingeringCompletedCommandIds = clearLingeringCompletedCommands(state);
+    visibility = {
+      hiddenTransientActivityIds: hiddenIds,
+      lingeringCompletedActivityIds: lingeringIds
+    };
   }
   return {
     thread: upsertTurn(state.thread, upsertItem(target, incoming)),
     items,
-    lingeringCompletedCommandIds,
+    ...visibility,
     needsResync: state.needsResync
   };
 }
@@ -330,9 +329,9 @@ function reduceAgentMessageDelta(
   return {
     thread: upsertTurn(state.thread, upsertItem(target, message)),
     items,
-    lingeringCompletedCommandIds: delta.trim().length > 0
-      ? clearLingeringCompletedCommands(state)
-      : state.lingeringCompletedCommandIds,
+    ...(delta.trim().length > 0
+      ? hideLingeringCompletedActivities(state)
+      : activityVisibility(state)),
     needsResync: state.needsResync
   };
 }
@@ -379,36 +378,144 @@ function reduceReasoningSummaryUpdate(
   return {
     thread: upsertTurn(state.thread, upsertItem(target, reasoning)),
     items,
-    lingeringCompletedCommandIds: state.lingeringCompletedCommandIds,
+    ...(isNewVisibleActivity(reasoning, current)
+      ? hideLingeringCompletedActivities(state)
+      : activityVisibility(state)),
     needsResync: state.needsResync
   };
 }
 
-function deriveLingeringCompletedCommandIds(thread: Thread): ReadonlySet<string> {
+function deriveActivityVisibility(thread: Thread): Pick<
+  ConversationReducerState,
+  'hiddenTransientActivityIds' | 'lingeringCompletedActivityIds'
+> {
   const activeTurns = thread.turns.filter((turn) => turn.status === 'inProgress');
   if (activeTurns.length !== 1) {
-    return new Set();
+    return {
+      hiddenTransientActivityIds: new Set(),
+      lingeringCompletedActivityIds: new Set()
+    };
   }
 
   const items = activeTurns[0]?.items ?? [];
+  const completedIds = new Set(
+    items.filter(isStoredSuccessfulTransientActivity).map((item) => item.id)
+  );
+  let lingeringId: string | undefined;
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
-    if (item?.type === 'agentMessage' && item.text.trim().length > 0) {
-      return new Set();
-    }
-    if (item?.type === 'commandExecution') {
-      return item.status === 'completed' ? new Set([item.id]) : new Set();
+    if (item && isVisibleActivity(item)) {
+      if (completedIds.has(item.id)) {
+        lingeringId = item.id;
+      }
+      break;
     }
   }
-  return new Set();
+  if (lingeringId) {
+    completedIds.delete(lingeringId);
+  }
+  return {
+    hiddenTransientActivityIds: completedIds,
+    lingeringCompletedActivityIds: lingeringId ? new Set([lingeringId]) : new Set()
+  };
 }
 
-function clearLingeringCompletedCommands(
+function activityVisibility(
   state: ConversationReducerState
-): ReadonlySet<string> {
-  return state.lingeringCompletedCommandIds.size === 0
-    ? state.lingeringCompletedCommandIds
-    : new Set();
+): Pick<
+  ConversationReducerState,
+  'hiddenTransientActivityIds' | 'lingeringCompletedActivityIds'
+> {
+  return {
+    hiddenTransientActivityIds: state.hiddenTransientActivityIds,
+    lingeringCompletedActivityIds: state.lingeringCompletedActivityIds
+  };
+}
+
+function hideLingeringCompletedActivities(
+  state: ConversationReducerState
+): Pick<
+  ConversationReducerState,
+  'hiddenTransientActivityIds' | 'lingeringCompletedActivityIds'
+> {
+  if (state.lingeringCompletedActivityIds.size === 0) {
+    return activityVisibility(state);
+  }
+  const hiddenIds = new Set(state.hiddenTransientActivityIds);
+  for (const id of state.lingeringCompletedActivityIds) {
+    hiddenIds.add(id);
+  }
+  return {
+    hiddenTransientActivityIds: hiddenIds,
+    lingeringCompletedActivityIds: new Set()
+  };
+}
+
+function isNewVisibleActivity(
+  incoming: ThreadItem,
+  current: ThreadItem | undefined
+): boolean {
+  return isVisibleActivity(incoming) && (!current || !isVisibleActivity(current));
+}
+
+function isVisibleActivity(item: ThreadItem): boolean {
+  if (item.type === 'userMessage') {
+    return false;
+  }
+  if (item.type === 'agentMessage') {
+    return item.text.trim().length > 0;
+  }
+  if (item.type === 'reasoning') {
+    return item.summary.some((part) => part.trim().length > 0);
+  }
+  return true;
+}
+
+function isTransientActivity(item: ThreadItem): boolean {
+  return [
+    'commandExecution',
+    'fileChange',
+    'mcpToolCall',
+    'dynamicToolCall',
+    'webSearch',
+    'imageView',
+    'imageGeneration',
+    'sleep'
+  ].includes(item.type);
+}
+
+function isSuccessfulTransientActivity(item: ThreadItem): boolean {
+  switch (item.type) {
+    case 'commandExecution':
+    case 'fileChange':
+      return item.status === 'completed';
+    case 'mcpToolCall':
+      return item.status === 'completed' && item.error === null;
+    case 'dynamicToolCall':
+      return item.status === 'completed' && item.success !== false;
+    case 'webSearch':
+    case 'imageView':
+    case 'sleep':
+      return true;
+    case 'imageGeneration': {
+      const status = item.status.toLowerCase();
+      return !['fail', 'error', 'declin', 'interrupt', 'cancel'].some((value) =>
+        status.includes(value)
+      );
+    }
+    default:
+      return false;
+  }
+}
+
+function isStoredSuccessfulTransientActivity(item: ThreadItem): boolean {
+  if (item.type === 'imageGeneration') {
+    return ['completed', 'success', 'succeeded'].includes(item.status.toLowerCase());
+  }
+  return item.type !== 'webSearch' &&
+    item.type !== 'imageView' &&
+    item.type !== 'sleep' &&
+    isSuccessfulTransientActivity(item);
 }
 
 function mergeStartedTurn(existing: Turn, incoming: Turn): Turn {

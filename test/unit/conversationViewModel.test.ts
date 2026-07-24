@@ -211,7 +211,7 @@ test('does not render an empty reasoning summary card', () => {
   assert.equal(model.turns[0]?.workDetails, null);
 });
 
-test('hides a completed command after the next assistant message and retains its history', () => {
+test('hides completed transient activities after the next assistant message and retains history', () => {
   const turnItems = [items[0]!, items[3]!, items[4]!, items[1]!];
   const running = toConversationViewModel(createThread({
     status: { type: 'active', activeFlags: [] },
@@ -229,7 +229,7 @@ test('hides a completed command after the next assistant message and retains its
   const reloaded = toConversationViewModel(completedThread);
 
   assert.equal(running.turns[0]?.workDetails, null);
-  assert.deepEqual(running.turns[0]?.liveItemIds, ['user-1', 'file-1', 'agent-1']);
+  assert.deepEqual(running.turns[0]?.liveItemIds, ['user-1', 'agent-1']);
   assert.deepEqual(completed.turns[0]?.workDetails, { count: 2, status: null });
   assert.deepEqual(reloaded.turns[0]?.workDetails, completed.turns[0]?.workDetails);
   assert.deepEqual(

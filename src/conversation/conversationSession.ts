@@ -170,7 +170,7 @@ export class ConversationSession {
       model: toConversationViewModel(
         this.reducer.thread,
         this.workspaceFolders,
-        this.reducer.lingeringCompletedCommandIds
+        this.reducer.hiddenTransientActivityIds
       ),
       revision: this.revision,
       sync: this.sync,

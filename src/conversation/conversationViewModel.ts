@@ -59,7 +59,7 @@ export type ConversationItemViewModel =
 export function toConversationViewModel(
   thread: Thread,
   workspaceFolders: readonly ConversationWorkspaceFolder[] = [],
-  lingeringCompletedCommandIds?: ReadonlySet<string>
+  hiddenTransientActivityIds?: ReadonlySet<string>
 ): ConversationViewModel {
   const changedFiles = resolveConversationChangedFiles(thread, workspaceFolders);
   return {
@@ -77,7 +77,7 @@ export function toConversationViewModel(
         change,
         canOpen
       })),
-      lingeringCompletedCommandIds
+      hiddenTransientActivityIds
     ))
   };
 }
@@ -85,7 +85,7 @@ export function toConversationViewModel(
 function toTurnViewModel(
   turn: Turn,
   changedFiles: readonly ConversationChangedFileViewModel[],
-  lingeringCompletedCommandIds?: ReadonlySet<string>
+  hiddenTransientActivityIds?: ReadonlySet<string>
 ): ConversationTurnViewModel {
   const items = turn.items
     .map((item) => toItemViewModel(item, turn.status))
@@ -105,40 +105,51 @@ function toTurnViewModel(
     changedFiles,
     items,
     liveItemIds: turn.status === 'inProgress'
-      ? selectLiveItemIds(items, lingeringCompletedCommandIds)
+      ? selectLiveItemIds(items, hiddenTransientActivityIds)
       : null
   };
 }
 
 function selectLiveItemIds(
   items: readonly ConversationItemViewModel[],
-  lingeringCompletedCommandIds?: ReadonlySet<string>
+  hiddenTransientActivityIds?: ReadonlySet<string>
 ): readonly string[] {
-  if (lingeringCompletedCommandIds) {
-    return items.filter((item) => (
-      item.kind !== 'activity' ||
-      item.activityKind !== 'command' ||
-      item.status !== 'Completed' ||
-      lingeringCompletedCommandIds.has(item.id)
-    )).map((item) => item.id);
+  if (hiddenTransientActivityIds) {
+    return items
+      .filter((item) => !hiddenTransientActivityIds.has(item.id))
+      .map((item) => item.id);
   }
 
-  let latestCommandOrAssistantIndex = -1;
+  let latestActivityOrAssistantIndex = -1;
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
     if (
-      (item?.kind === 'activity' && item.activityKind === 'command') ||
+      item?.kind === 'activity' ||
       (item?.kind === 'message' && item.role === 'assistant')
     ) {
-      latestCommandOrAssistantIndex = index;
+      latestActivityOrAssistantIndex = index;
       break;
     }
   }
 
   return items.filter((item, index) => {
-    if (item.kind !== 'activity' || item.activityKind !== 'command') return true;
-    return item.status !== 'Completed' || index === latestCommandOrAssistantIndex;
+    if (!isCompletedTransientActivity(item)) return true;
+    return index === latestActivityOrAssistantIndex;
   }).map((item) => item.id);
+}
+
+function isCompletedTransientActivity(item: ConversationItemViewModel): boolean {
+  if (item.kind !== 'activity' || item.status !== 'Completed') {
+    return false;
+  }
+  return [
+    'command',
+    'fileChange',
+    'mcp',
+    'tool',
+    'imageGeneration',
+    'sleep'
+  ].includes(item.activityKind);
 }
 
 function workDetailsStatus(turn: Turn): ConversationWorkDetailsViewModel['status'] {
