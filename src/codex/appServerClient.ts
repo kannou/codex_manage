@@ -38,6 +38,7 @@ import {
   parseInitializeResponse,
   parseConversationConfigDefaults,
   parseModelListResponse,
+  parseAccountRateLimitsResponse,
   parseSkillsListResponse,
   parseThreadListResponse,
   parseThreadReadResponse,
@@ -51,6 +52,7 @@ import type { ModelListParams } from './protocol/generated/v2/ModelListParams';
 import type { ModelListResponse } from './protocol/generated/v2/ModelListResponse';
 import type { SkillsListParams } from './protocol/generated/v2/SkillsListParams';
 import type { SkillsListResponse } from './protocol/generated/v2/SkillsListResponse';
+import type { GetAccountRateLimitsResponse } from './protocol/generated/v2/GetAccountRateLimitsResponse';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const SERVER_REQUEST_NOT_SUPPORTED = -32601;
@@ -292,6 +294,12 @@ export class AppServerClient {
     } catch (error) {
       throw this.classifyRequiredProtocolError(error, 'skills/list failed.');
     }
+  }
+
+  public async readAccountRateLimits(): Promise<GetAccountRateLimitsResponse> {
+    await this.connect();
+    const result = await this.sendRequest((id) => ({ method: 'account/rateLimits/read', id, params: undefined }));
+    return parseAccountRateLimitsResponse(result);
   }
 
   public async interruptTurn(params: TurnInterruptParams): Promise<TurnInterruptResponse> {

@@ -58,6 +58,8 @@ interface ConversationComposerTarget {
   readonly status: HTMLElement;
   readonly error: HTMLElement;
   readonly announcer: HTMLElement;
+  readonly usageButton: HTMLButtonElement;
+  readonly usagePanel: HTMLElement;
   readonly add: HTMLButtonElement;
   readonly addMenu: HTMLElement;
   readonly attachments: HTMLElement;
@@ -175,6 +177,10 @@ app.addEventListener('click', (event) => {
     toggleAddMenu();
     return;
   }
+  if (action === 'usage') {
+    toggleUsagePanel();
+    return;
+  }
   if (action === 'add-image') {
     addConversationInput('localImage');
     return;
@@ -250,6 +256,8 @@ document.addEventListener('click', (event) => {
   ) {
     closeAddMenu(false);
   }
+  if (target && !target.usagePanel.hidden && event.target instanceof Node &&
+      !target.usagePanel.contains(event.target) && event.target !== target.usageButton) closeUsagePanel(false);
 });
 
 app.addEventListener('keydown', (event) => {
@@ -261,6 +269,9 @@ app.addEventListener('keydown', (event) => {
     event.stopPropagation();
     closeRuntimeSettings(true);
     return;
+  }
+  if (event.key === 'Escape' && conversationComposerTarget && !conversationComposerTarget.usagePanel.hidden) {
+    event.preventDefault(); closeUsagePanel(true); return;
   }
   if (event.key === 'Escape' && conversationComposerTarget && !conversationComposerTarget.addMenu.hidden) {
     event.preventDefault();
@@ -409,6 +420,10 @@ function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
       return;
     case 'threads/conversationCopyResult':
       handleConversationCopyResult(message);
+      return;
+    case 'threads/conversationUsage':
+      renderUsage(message);
+      return;
   }
 }
 
@@ -781,6 +796,17 @@ function showConversationShell(
   footer.className = 'conversation-composer-footer';
   const info = document.createElement('div');
   info.className = 'conversation-composer-info';
+  const usageButton = actionButton('◔', 'usage');
+  usageButton.className = 'conversation-usage-button';
+  usageButton.title = 'Remaining usage';
+  usageButton.setAttribute('aria-label', 'Show remaining usage');
+  usageButton.setAttribute('aria-haspopup', 'dialog');
+  usageButton.setAttribute('aria-expanded', 'false');
+  const usagePanel = document.createElement('section');
+  usagePanel.className = 'conversation-usage-panel';
+  usagePanel.setAttribute('role', 'dialog');
+  usagePanel.setAttribute('aria-label', 'Remaining usage');
+  usagePanel.hidden = true;
   const status = document.createElement('span');
   status.id = 'conversation-composer-status';
   status.className = 'conversation-composer-status';
@@ -796,10 +822,10 @@ function showConversationShell(
   const send = actionButton('Send', 'send');
   send.className = 'conversation-send';
   send.title = 'Send (Ctrl/Cmd+Enter)';
-  info.append(status);
+  info.append(usageButton, status);
   controls.append(stop, send);
   footer.append(info, controls);
-  composer.append(latest, tools, attachments, inputLabel, input, error, footer);
+  composer.append(latest, tools, attachments, inputLabel, input, error, usagePanel, footer);
 
   section.append(header, notice, content, interactions, announcer, composer);
   app.append(section);
@@ -809,7 +835,7 @@ function showConversationShell(
   conversationTitleStatus = titleStatus;
   conversationLatestButton = latest;
   conversationComposerTarget = {
-    container: composer, input, send, stop, status, error, announcer,
+    container: composer, input, send, stop, status, error, announcer, usageButton, usagePanel,
     add, addMenu, attachments, settings, settingsSummary, settingsCurrent,
     model: model.select,
     effort: effort.select,
@@ -1767,6 +1793,57 @@ function closeRuntimeSettings(restoreFocus: boolean): void {
   if (restoreFocus) target.settingsSummary.focus({ preventScroll: true });
 }
 
+function toggleUsagePanel(): void {
+  const target = conversationComposerTarget;
+  if (!target) return;
+  if (!target.usagePanel.hidden) { closeUsagePanel(false); return; }
+  target.settings.open = false;
+  closeAddMenu(false);
+  target.usagePanel.hidden = false;
+  target.usageButton.setAttribute('aria-expanded', 'true');
+  target.usagePanel.textContent = 'Loading usage…';
+  vscode.postMessage({ type: 'threads/conversation/usage/read' });
+}
+
+function closeUsagePanel(restoreFocus: boolean): void {
+  const target = conversationComposerTarget;
+  if (!target) return;
+  target.usagePanel.hidden = true;
+  target.usageButton.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) target.usageButton.focus({ preventScroll: true });
+}
+
+function renderUsage(message: Extract<ThreadsHostToWebviewMessage, { type: 'threads/conversationUsage' }>): void {
+  const panel = conversationComposerTarget?.usagePanel;
+  if (!panel || panel.hidden) return;
+  if (message.status === 'loading') { panel.textContent = 'Loading usage…'; return; }
+  if (message.status === 'unavailable' || !message.usage) {
+    const text = document.createElement('span'); text.textContent = 'Usage unavailable';
+    const retry = actionButton('Retry', 'usage'); panel.replaceChildren(text, retry); return;
+  }
+  const rows: HTMLElement[] = [];
+  for (const [label, value] of [['Primary window', message.usage.primary], ['Secondary window', message.usage.secondary]] as const) {
+    if (!value) continue;
+    const row = document.createElement('p');
+    row.textContent = `${label}: ${formatPercent(value.remainingPercent)} remaining${value.resetsAt === null ? '' : ` · resets ${new Date(value.resetsAt * 1000).toLocaleString()}`}`;
+    rows.push(row);
+  }
+  if (message.usage.credits) {
+    const row = document.createElement('p');
+    row.textContent = message.usage.credits.unlimited ? 'Credits: unlimited' : `Credits: ${message.usage.credits.balance ?? 'available'}`;
+    rows.push(row);
+  }
+  if (message.usage.individualLimit) {
+    const limit = message.usage.individualLimit; const row = document.createElement('p');
+    row.textContent = `Personal limit: ${formatPercent(limit.remainingPercent)} remaining (${limit.used} of ${limit.limit}) · resets ${new Date(limit.resetsAt * 1000).toLocaleString()}`;
+    rows.push(row);
+  }
+  if (!rows.length) { panel.textContent = 'Usage unavailable'; return; }
+  panel.replaceChildren(...rows);
+}
+
+function formatPercent(value: number): string { return `${Math.round(value * 10) / 10}%`; }
+
 function runtimeSelect(label: string, id: string): { container: HTMLElement; select: HTMLSelectElement } {
   const container = document.createElement('label');
   container.className = 'conversation-runtime-field';
@@ -2068,7 +2145,7 @@ function actionButton(
   label: string,
   action: ThreadListAction | 'new' | 'open' | 'back' | 'reload' | 'send' | 'stop' | 'add' |
     'add-image' | 'add-mention' | 'add-skill' | 'remove-attachment' |
-    'bookmark-toggle' | 'latest' |
+    'bookmark-toggle' | 'latest' | 'usage' |
     'interaction-accept' | 'interaction-session' | 'interaction-decline' | 'interaction-cancel',
   threadId?: string
 ): HTMLButtonElement {

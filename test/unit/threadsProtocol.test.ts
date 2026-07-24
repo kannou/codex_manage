@@ -72,6 +72,7 @@ test('accepts only the explicit sidebar navigation messages', () => {
     { type: 'threads/open', threadId: 'thread-1' },
     { type: 'threads/back' },
     { type: 'threads/reload' }
+    ,{ type: 'threads/conversation/usage/read' }
   ]) {
     assert.equal(isThreadsWebviewMessage(message), true);
   }
@@ -81,6 +82,16 @@ test('accepts only the explicit sidebar navigation messages', () => {
   assert.equal(isThreadsWebviewMessage({ type: 'threads/viewFocus', focused: true, threadId: 'thread-1' }), false);
   assert.equal(isThreadsWebviewMessage({ type: 'threads/new', method: 'thread/start' }), false);
   assert.equal(isThreadsWebviewMessage({ type: 'threads/execute', command: 'anything' }), false);
+});
+
+test('validates usage snapshots without accepting misleading percentages', () => {
+  const usage = { primary: { remainingPercent: 75, resetsAt: 1_750_000_000 }, secondary: null,
+    credits: { unlimited: false, balance: '12.50' }, individualLimit: null };
+  assert.equal(isThreadsHostMessage({ type: 'threads/conversationUsage', status: 'ready', usage }), true);
+  assert.equal(isThreadsHostMessage({ type: 'threads/conversationUsage', status: 'ready', usage: {
+    ...usage, primary: { remainingPercent: -1, resetsAt: null }
+  }}), false);
+  assert.equal(isThreadsHostMessage({ type: 'threads/conversationUsage', status: 'unavailable' }), true);
 });
 
 test('requires thread IDs only for thread-scoped management actions', () => {

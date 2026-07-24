@@ -82,6 +82,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     startThread: (params) => (activeClient ?? replaceClient()).startThread(params),
     readConversationConfig: (cwd) => (activeClient ?? replaceClient()).readConversationConfig({ cwd }),
+    readAccountRateLimits: () => (activeClient ?? replaceClient()).readAccountRateLimits(),
     readNewConversationDefaults: () => {
       const configuration = vscode.workspace.getConfiguration('codexThreadManager');
       return {

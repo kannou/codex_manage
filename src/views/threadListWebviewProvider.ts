@@ -52,6 +52,8 @@ import {
 import type { ConnectionStatus } from './threadTreeProvider';
 import { extractFencedCodeBlocks } from '../conversation/fencedCode';
 import type { ConversationWorkspaceFolder } from '../conversation/conversationChangedFiles';
+import type { GetAccountRateLimitsResponse } from '../codex/protocol/generated/v2/GetAccountRateLimitsResponse';
+import { parseRateLimitSnapshot } from '../codex/protocol/guards';
 
 const ACTION_COMMANDS: Readonly<Record<ThreadListAction, string>> = {
   loadMoreActive: 'codexThreadManager.loadMoreActive',
@@ -73,6 +75,7 @@ export interface ThreadListWebviewProviderOptions {
   readonly conversationClient: ConversationSessionClient;
   readonly startThread?: (params: ThreadStartParams) => Promise<ThreadStartResponse>;
   readonly readConversationConfig?: (cwd: string) => Promise<ConversationConfigDefaults>;
+  readonly readAccountRateLimits?: () => Promise<GetAccountRateLimitsResponse>;
   readonly readNewConversationDefaults?: () => NewConversationDefaults;
   readonly onConversationCreated?: (thread: Thread) => void;
   readonly renameConversationThread?: (threadId: string, name: string) => Promise<void>;
@@ -212,6 +215,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private readonly unreadCompletedTurnByThread = new Map<string, string>();
   private conversationScreenOpen = false;
   private webviewFocused = false;
+  private accountRateLimits: GetAccountRateLimitsResponse['rateLimits'] | undefined;
   private disposed = false;
 
   public constructor(private readonly options: ThreadListWebviewProviderOptions) {}
@@ -279,6 +283,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
             } else if (this.activeThread) {
               this.reloadConversation();
             }
+            return;
+          case 'threads/conversation/usage/read':
+            void this.readUsage();
             return;
           case 'threads/conversation/send':
             this.runConversationOperation(
@@ -539,6 +546,28 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   }
 
   public handleNotification(notification: AppServerNotification): void {
+    if (notification.method === 'account/rateLimits/updated') {
+      try {
+        const params = notification.params;
+        if (!isJsonObject(params)) throw new Error('Missing rate limit data.');
+        const update = parseRateLimitSnapshot(params.rateLimits);
+        this.accountRateLimits = this.accountRateLimits ? {
+          ...this.accountRateLimits,
+          ...update,
+          limitId: update.limitId ?? this.accountRateLimits.limitId,
+          limitName: update.limitName ?? this.accountRateLimits.limitName,
+          primary: update.primary ?? this.accountRateLimits.primary,
+          secondary: update.secondary ?? this.accountRateLimits.secondary,
+          credits: update.credits ?? this.accountRateLimits.credits,
+          individualLimit: update.individualLimit ?? this.accountRateLimits.individualLimit,
+          planType: update.planType ?? this.accountRateLimits.planType
+        } : update;
+        this.postUsage(this.accountRateLimits);
+      } catch (error) {
+        this.options.logger.appendLine(`[threads] Ignored malformed rate limit update: ${asError(error).message}`);
+      }
+      return;
+    }
     if (
       notification.method === 'thread/deleted' &&
       isJsonObject(notification.params) &&
@@ -619,6 +648,30 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         if (draft) draft.malformed = true;
       }
     }
+  }
+
+  private async readUsage(): Promise<void> {
+    this.post({ type: 'threads/conversationUsage', status: 'loading' });
+    try {
+      if (!this.options.readAccountRateLimits) throw new Error('Rate limits are unsupported.');
+      this.accountRateLimits = (await this.options.readAccountRateLimits()).rateLimits;
+      this.postUsage(this.accountRateLimits);
+    } catch (error) {
+      this.options.logger.appendLine(`[threads] Could not read account rate limits: ${asError(error).message}`);
+      this.post({ type: 'threads/conversationUsage', status: 'unavailable' });
+    }
+  }
+
+  private postUsage(snapshot: GetAccountRateLimitsResponse['rateLimits']): void {
+    const window = (value: typeof snapshot.primary) => value && ({
+      remainingPercent: 100 - value.usedPercent,
+      resetsAt: value.resetsAt
+    });
+    this.post({ type: 'threads/conversationUsage', status: 'ready', usage: {
+      primary: window(snapshot.primary), secondary: window(snapshot.secondary),
+      credits: snapshot.credits && { unlimited: snapshot.credits.unlimited, balance: snapshot.credits.balance },
+      individualLimit: snapshot.individualLimit
+    }});
   }
 
   public handleServerRequest(request: AppServerRequest): void {
