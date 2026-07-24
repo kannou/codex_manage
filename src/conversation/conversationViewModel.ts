@@ -31,6 +31,7 @@ export interface ConversationTurnViewModel {
   readonly workDetails: ConversationWorkDetailsViewModel | null;
   readonly changedFiles: readonly ConversationChangedFileViewModel[];
   readonly items: readonly ConversationItemViewModel[];
+  readonly liveItemIds: readonly string[] | null;
 }
 
 export interface ConversationWorkDetailsViewModel {
@@ -99,8 +100,28 @@ function toTurnViewModel(
       ? { count: workItemCount, status: workDetailsStatus(turn) }
       : null,
     changedFiles,
-    items
+    items,
+    liveItemIds: turn.status === 'inProgress' ? selectLiveItemIds(items) : null
   };
+}
+
+function selectLiveItemIds(items: readonly ConversationItemViewModel[]): readonly string[] {
+  const commandItems = items.filter((item): item is Extract<
+    ConversationItemViewModel,
+    { kind: 'activity' }
+  > => (
+    item.kind === 'activity' && item.activityKind === 'command'
+  ));
+  const activeCommands = commandItems.filter((item) => item.status === 'In Progress');
+  const latestCompletedCommand = activeCommands.length === 0
+    ? [...commandItems].reverse().find((item) => item.status === 'Completed')
+    : undefined;
+
+  return items.filter((item) => {
+    if (item.kind !== 'activity' || item.activityKind !== 'command') return true;
+    if (item.status !== 'Completed') return true;
+    return item.id === latestCompletedCommand?.id;
+  }).map((item) => item.id);
 }
 
 function workDetailsStatus(turn: Turn): ConversationWorkDetailsViewModel['status'] {
