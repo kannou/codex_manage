@@ -760,6 +760,81 @@ test('loads validated runtime choices and applies changed settings only to the n
   assert.equal((startParams[0] as { approvalsReviewer?: unknown }).approvalsReviewer, 'auto_review');
 });
 
+test('preserves a compatible reasoning effort and falls back for an unsupported model', () => {
+  const baseModel: Model = {
+    id: 'model-a',
+    model: 'model-a',
+    upgrade: null,
+    upgradeInfo: null,
+    availabilityNux: null,
+    displayName: 'Model A',
+    description: 'Current model',
+    hidden: false,
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'medium', description: 'Balanced' },
+      { reasoningEffort: 'high', description: 'More reasoning' }
+    ],
+    defaultReasoningEffort: 'medium',
+    inputModalities: ['text'],
+    supportsPersonality: false,
+    additionalSpeedTiers: [],
+    serviceTiers: [],
+    defaultServiceTier: null,
+    isDefault: true
+  };
+  const compatibleModel: Model = {
+    ...baseModel,
+    id: 'model-b',
+    model: 'model-b',
+    displayName: 'Model B',
+    description: 'Compatible model',
+    isDefault: false
+  };
+  const incompatibleModel: Model = {
+    ...baseModel,
+    id: 'model-c',
+    model: 'model-c',
+    displayName: 'Model C',
+    description: 'Model without high reasoning',
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'low', description: 'Fast' },
+      { reasoningEffort: 'medium', description: 'Balanced' }
+    ],
+    isDefault: false
+  };
+  const session = new ConversationSession(passiveClient(), createThread());
+  session.initializeRuntimeSettings(
+    [baseModel, compatibleModel, incompatibleModel],
+    baseModel.id,
+    'high',
+    null,
+    'workspace-write',
+    'on-request',
+    'user'
+  );
+
+  assert.equal(session.updateRuntimeSettings({
+    model: compatibleModel.id,
+    effort: null,
+    serviceTier: null,
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    approvalsReviewer: 'user'
+  }), true);
+  assert.equal(session.snapshot().runtime.effort, 'high');
+
+  assert.equal(session.updateRuntimeSettings({
+    model: incompatibleModel.id,
+    effort: null,
+    serviceTier: null,
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    approvalsReviewer: 'user'
+  }), true);
+  assert.equal(session.snapshot().runtime.effort, null);
+  assert.equal(session.snapshot().runtime.defaultEffort, 'medium');
+});
+
 test('switches every advertised model while preserving a granular approval policy', async () => {
   const granularApproval = {
     granular: {
