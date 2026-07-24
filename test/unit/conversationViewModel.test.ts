@@ -211,7 +211,7 @@ test('does not render an empty reasoning summary card', () => {
   assert.equal(model.turns[0]?.workDetails, null);
 });
 
-test('hides completed commands live and groups all work after completion and reload', () => {
+test('hides a completed command after the next assistant message and retains its history', () => {
   const turnItems = [items[0]!, items[3]!, items[4]!, items[1]!];
   const running = toConversationViewModel(createThread({
     status: { type: 'active', activeFlags: [] },
@@ -238,7 +238,7 @@ test('hides completed commands live and groups all work after completion and rel
   );
 });
 
-test('hides successful commands as soon as they complete while the turn is running', () => {
+test('keeps the latest completed command visible until the next command starts', () => {
   const command = items[3] as Extract<ThreadItem, { type: 'commandExecution' }>;
   const commands: ThreadItem[] = [
     { ...command, id: 'command-first', command: 'printf first' },
@@ -256,7 +256,8 @@ test('hides successful commands as soon as they complete while the turn is runni
 
   assert.deepEqual(running.turns[0]?.liveItemIds, [
     'user-1',
-    'command-failed'
+    'command-failed',
+    'command-latest'
   ]);
   assert.deepEqual(running.turns[0]?.items.map((item) => item.id), [
     'user-1',
@@ -264,6 +265,20 @@ test('hides successful commands as soon as they complete while the turn is runni
     'command-failed',
     'command-latest'
   ]);
+});
+
+test('keeps a completed command visible while Codex has not started its next activity', () => {
+  const command = items[3] as Extract<ThreadItem, { type: 'commandExecution' }>;
+  const running = toConversationViewModel(createThread({
+    turns: [createTurn({
+      status: 'inProgress',
+      completedAt: null,
+      durationMs: null,
+      items: [items[0]!, { ...command, id: 'command-completed' }]
+    })]
+  }));
+
+  assert.deepEqual(running.turns[0]?.liveItemIds, ['user-1', 'command-completed']);
 });
 
 test('shows parallel running commands while retaining all command history', () => {

@@ -106,9 +106,21 @@ function toTurnViewModel(
 }
 
 function selectLiveItemIds(items: readonly ConversationItemViewModel[]): readonly string[] {
-  return items.filter((item) => {
+  let latestCommandOrAssistantIndex = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (
+      (item?.kind === 'activity' && item.activityKind === 'command') ||
+      (item?.kind === 'message' && item.role === 'assistant')
+    ) {
+      latestCommandOrAssistantIndex = index;
+      break;
+    }
+  }
+
+  return items.filter((item, index) => {
     if (item.kind !== 'activity' || item.activityKind !== 'command') return true;
-    return item.status !== 'Completed';
+    return item.status !== 'Completed' || index === latestCommandOrAssistantIndex;
   }).map((item) => item.id);
 }
 
