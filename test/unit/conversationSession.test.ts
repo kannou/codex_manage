@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Thread } from '../../src/codex/protocol/generated/v2/Thread';
+import type { ThreadItem } from '../../src/codex/protocol/generated/v2/ThreadItem';
 import type { ThreadResumeResponse } from '../../src/codex/protocol/generated/v2/ThreadResumeResponse';
 import type { Turn } from '../../src/codex/protocol/generated/v2/Turn';
 import type { Model } from '../../src/codex/protocol/generated/v2/Model';
@@ -59,6 +60,25 @@ function liveTurn(id = 'turn-live'): Turn {
     durationMs: null,
     items: []
   });
+}
+
+function commandExecution(
+  id: string,
+  status: Extract<ThreadItem, { type: 'commandExecution' }>['status']
+): Extract<ThreadItem, { type: 'commandExecution' }> {
+  return {
+    type: 'commandExecution',
+    id,
+    command: `printf ${id}`,
+    cwd: 'D:\\workspace',
+    processId: null,
+    source: 'agent',
+    status,
+    commandActions: [],
+    aggregatedOutput: '',
+    exitCode: status === 'completed' ? 0 : null,
+    durationMs: status === 'completed' ? 10 : null
+  };
 }
 
 test('resumes before starting a text turn and locks concurrent sends', async () => {
@@ -179,6 +199,129 @@ test('applies streaming deltas and converges on the completed turn snapshot', ()
     assert.equal(item.text, 'Final response');
   }
   assert.equal(session.snapshot().operation, 'idle');
+});
+
+test('keeps a completed command until the next command or visible Codex response', () => {
+  const session = new ConversationSession(passiveClient(), createThread());
+  const turn = liveTurn();
+  session.applyNotification({
+    method: 'turn/started',
+    params: { threadId: 'thread-1', turn }
+  });
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: commandExecution('command-first', 'inProgress'),
+      startedAtMs: 1
+    }
+  });
+  session.applyNotification({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: commandExecution('command-first', 'completed'),
+      completedAtMs: 2
+    }
+  });
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: {
+        type: 'agentMessage',
+        id: 'agent-live',
+        text: '',
+        phase: null,
+        memoryCitation: null
+      },
+      startedAtMs: 3
+    }
+  });
+
+  let snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('command-first'), true);
+  assert.equal(snapshot?.items.some((item) => item.id === 'agent-live'), false);
+
+  session.applyNotification({
+    method: 'item/reasoning/summaryTextDelta',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      itemId: 'reasoning-live',
+      summaryIndex: 0,
+      delta: 'Checking'
+    }
+  });
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: {
+        type: 'fileChange',
+        id: 'file-live',
+        changes: [],
+        status: 'inProgress'
+      },
+      startedAtMs: 4
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('command-first'), true);
+
+  session.applyNotification({
+    method: 'item/agentMessage/delta',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      itemId: 'agent-live',
+      delta: '次の返答'
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('command-first'), false);
+  assert.equal(
+    snapshot?.items.find((item) => item.id === 'agent-live')?.kind,
+    'message'
+  );
+
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: commandExecution('command-second', 'inProgress'),
+      startedAtMs: 5
+    }
+  });
+  session.applyNotification({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: commandExecution('command-second', 'completed'),
+      completedAtMs: 6
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('command-second'), true);
+
+  session.applyNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      turnId: turn.id,
+      item: commandExecution('command-third', 'inProgress'),
+      startedAtMs: 7
+    }
+  });
+  snapshot = session.snapshot().model.turns[0];
+  assert.equal(snapshot?.liveItemIds?.includes('command-second'), false);
+  assert.equal(snapshot?.liveItemIds?.includes('command-third'), true);
 });
 
 test('keeps streamed text visible and uses one convergence workflow for duplicate completion', async () => {

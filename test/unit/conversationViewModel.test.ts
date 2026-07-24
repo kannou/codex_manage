@@ -211,7 +211,7 @@ test('does not render an empty reasoning summary card', () => {
   assert.equal(model.turns[0]?.workDetails, null);
 });
 
-test('keeps live work items separate and groups the same items after completion and reload', () => {
+test('hides a completed command after the next assistant message and retains its history', () => {
   const turnItems = [items[0]!, items[3]!, items[4]!, items[1]!];
   const running = toConversationViewModel(createThread({
     status: { type: 'active', activeFlags: [] },
@@ -229,7 +229,7 @@ test('keeps live work items separate and groups the same items after completion 
   const reloaded = toConversationViewModel(completedThread);
 
   assert.equal(running.turns[0]?.workDetails, null);
-  assert.deepEqual(running.turns[0]?.liveItemIds, turnItems.map((item) => item.id));
+  assert.deepEqual(running.turns[0]?.liveItemIds, ['user-1', 'file-1', 'agent-1']);
   assert.deepEqual(completed.turns[0]?.workDetails, { count: 2, status: null });
   assert.deepEqual(reloaded.turns[0]?.workDetails, completed.turns[0]?.workDetails);
   assert.deepEqual(
@@ -238,7 +238,7 @@ test('keeps live work items separate and groups the same items after completion 
   );
 });
 
-test('keeps only the latest successful sequential command in the running view', () => {
+test('keeps the latest completed command visible until the next command starts', () => {
   const command = items[3] as Extract<ThreadItem, { type: 'commandExecution' }>;
   const commands: ThreadItem[] = [
     { ...command, id: 'command-first', command: 'printf first' },
@@ -265,6 +265,20 @@ test('keeps only the latest successful sequential command in the running view', 
     'command-failed',
     'command-latest'
   ]);
+});
+
+test('keeps a completed command visible while Codex has not started its next activity', () => {
+  const command = items[3] as Extract<ThreadItem, { type: 'commandExecution' }>;
+  const running = toConversationViewModel(createThread({
+    turns: [createTurn({
+      status: 'inProgress',
+      completedAt: null,
+      durationMs: null,
+      items: [items[0]!, { ...command, id: 'command-completed' }]
+    })]
+  }));
+
+  assert.deepEqual(running.turns[0]?.liveItemIds, ['user-1', 'command-completed']);
 });
 
 test('shows parallel running commands while retaining all command history', () => {
