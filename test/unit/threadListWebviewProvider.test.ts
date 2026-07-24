@@ -48,9 +48,19 @@ class FakeWebview {
 class FakeWebviewView {
   public readonly webview = new FakeWebview();
   public visible = true;
-  public badge: vscode.ViewBadge | undefined;
+  public readonly badgeUpdates: Array<vscode.ViewBadge | undefined> = [];
+  private currentBadge: vscode.ViewBadge | undefined;
   private readonly disposeListeners = new Set<Listener<void>>();
   private readonly visibilityListeners = new Set<Listener<void>>();
+
+  public get badge(): vscode.ViewBadge | undefined {
+    return this.currentBadge;
+  }
+
+  public set badge(value: vscode.ViewBadge | undefined) {
+    this.currentBadge = value;
+    this.badgeUpdates.push(value);
+  }
 
   public onDidDispose(listener: Listener<void>): vscode.Disposable {
     this.disposeListeners.add(listener);
@@ -1519,6 +1529,94 @@ test('tracks unseen completions by thread and clears only the reviewed thread', 
   await flushPromises();
   view.webview.fire({ type: 'threads/reload' });
   assert.equal(view.badge, undefined);
+  assert.deepEqual(view.badgeUpdates.slice(-2), [
+    { value: 0, tooltip: 'No completed conversations to review' },
+    undefined
+  ]);
+});
+
+test('does not retain completion badges for threads outside the current list', async (t) => {
+  setWorkspace();
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  const knownThread = displayThread('thread-1', 'Thread 1');
+  provider.setSnapshot(snapshot(knownThread));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/viewFocus', focused: false });
+  view.webview.fire({ type: 'threads/ready' });
+
+  provider.handleNotification({
+    method: 'turn/completed',
+    params: { threadId: 'thread-outside-workspace', turn: createTurn({ id: 'turn-foreign' }) }
+  });
+  assert.equal(view.badge, undefined);
+
+  provider.handleNotification({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: createTurn({ id: 'turn-known' }) }
+  });
+  assert.deepEqual(view.badge, {
+    value: 1,
+    tooltip: '1 completed conversation to review'
+  });
+
+  provider.setSnapshot(snapshot());
+  assert.equal(view.badge, undefined);
+});
+
+test('shows a completion badge when a sent turn finishes after returning to the list', async (t) => {
+  setWorkspace();
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: {
+      ...fakeConversationClient(async (threadId) => createThread({ id: threadId })),
+      startTurn: async () => ({
+        turn: createTurn({
+          id: 'turn-background',
+          status: 'inProgress',
+          completedAt: null,
+          durationMs: null,
+          items: []
+        })
+      })
+    },
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/viewFocus', focused: true });
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const loaded = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { sessionId: string } };
+
+  view.webview.fire({
+    type: 'threads/conversation/send',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    requestId: 'send-background',
+    text: 'Finish after Back'
+  });
+  await flushPromises();
+  view.webview.fire({ type: 'threads/back' });
+  provider.handleNotification({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: createTurn({ id: 'turn-background' }) }
+  });
+
+  assert.deepEqual(view.badge, {
+    value: 1,
+    tooltip: '1 completed conversation to review'
+  });
 });
 
 test('automatically posts authoritative items when a completed turn notification omits details', async (t) => {

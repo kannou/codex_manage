@@ -378,6 +378,17 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
 
   public setSnapshot(snapshot: ThreadRepositorySnapshot): void {
     this.snapshot = snapshot;
+    let removedUnreadCompletion = false;
+    for (const threadId of this.unreadCompletedTurnByThread.keys()) {
+      if (!this.isTrackedCompletionThread(threadId)) {
+        this.unreadCompletedTurnByThread.delete(threadId);
+        this.latestCompletedTurnByThread.delete(threadId);
+        removedUnreadCompletion = true;
+      }
+    }
+    if (removedUnreadCompletion) {
+      this.updateUnreadCompletionPresentation(false);
+    }
     for (const thread of snapshot.archive.threads) {
       this.conversationDrafts.delete(thread.id);
     }
@@ -1872,6 +1883,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   }
 
   private recordCompletedTurn(threadId: string, turnId: string): void {
+    if (!this.isTrackedCompletionThread(threadId)) {
+      return;
+    }
     if (this.latestCompletedTurnByThread.get(threadId) === turnId) {
       return;
     }
@@ -1887,6 +1901,10 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       this.unreadCompletedTurnByThread.set(threadId, turnId);
     }
     this.updateUnreadCompletionPresentation();
+  }
+
+  private isTrackedCompletionThread(threadId: string): boolean {
+    return this.activeThread?.id === threadId || Boolean(this.findThread(threadId));
   }
 
   private confirmCompletedTurnSeen(
@@ -1917,19 +1935,28 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.updateUnreadCompletionPresentation();
   }
 
-  private updateUnreadCompletionPresentation(): void {
+  private updateUnreadCompletionPresentation(updateList = true): void {
     const count = this.unreadCompletedTurnByThread.size;
     if (this.view) {
-      this.view.badge = count === 0
-        ? undefined
-        : {
+      if (count === 0) {
+        // VS Code leaves the previous WebviewView activity registered when a badge is
+        // cleared directly. Replacing it with a hidden zero badge first removes the
+        // stale Activity Bar count, while undefined keeps the public API state correct.
+        this.view.badge = {
+          value: 0,
+          tooltip: 'No completed conversations to review'
+        };
+        this.view.badge = undefined;
+      } else {
+        this.view.badge = {
           value: count,
           tooltip: count === 1
             ? '1 completed conversation to review'
             : `${count} completed conversations to review`
         };
+      }
     }
-    if (this.viewReady && !this.activeThread && !this.newConversationDraft) {
+    if (updateList && this.viewReady && !this.activeThread && !this.newConversationDraft) {
       this.postListState();
     }
   }
