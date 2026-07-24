@@ -58,7 +58,8 @@ export type ConversationItemViewModel =
 
 export function toConversationViewModel(
   thread: Thread,
-  workspaceFolders: readonly ConversationWorkspaceFolder[] = []
+  workspaceFolders: readonly ConversationWorkspaceFolder[] = [],
+  lingeringCompletedCommandIds?: ReadonlySet<string>
 ): ConversationViewModel {
   const changedFiles = resolveConversationChangedFiles(thread, workspaceFolders);
   return {
@@ -75,14 +76,16 @@ export function toConversationViewModel(
         path,
         change,
         canOpen
-      }))
+      })),
+      lingeringCompletedCommandIds
     ))
   };
 }
 
 function toTurnViewModel(
   turn: Turn,
-  changedFiles: readonly ConversationChangedFileViewModel[]
+  changedFiles: readonly ConversationChangedFileViewModel[],
+  lingeringCompletedCommandIds?: ReadonlySet<string>
 ): ConversationTurnViewModel {
   const items = turn.items
     .map((item) => toItemViewModel(item, turn.status))
@@ -101,11 +104,25 @@ function toTurnViewModel(
       : null,
     changedFiles,
     items,
-    liveItemIds: turn.status === 'inProgress' ? selectLiveItemIds(items) : null
+    liveItemIds: turn.status === 'inProgress'
+      ? selectLiveItemIds(items, lingeringCompletedCommandIds)
+      : null
   };
 }
 
-function selectLiveItemIds(items: readonly ConversationItemViewModel[]): readonly string[] {
+function selectLiveItemIds(
+  items: readonly ConversationItemViewModel[],
+  lingeringCompletedCommandIds?: ReadonlySet<string>
+): readonly string[] {
+  if (lingeringCompletedCommandIds) {
+    return items.filter((item) => (
+      item.kind !== 'activity' ||
+      item.activityKind !== 'command' ||
+      item.status !== 'Completed' ||
+      lingeringCompletedCommandIds.has(item.id)
+    )).map((item) => item.id);
+  }
+
   let latestCommandOrAssistantIndex = -1;
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
@@ -149,6 +166,9 @@ function toItemViewModel(
         text: formatUserInputs(item.content)
       };
     case 'agentMessage':
+      if (turnStatus === 'inProgress' && !item.text.trim()) {
+        return null;
+      }
       return {
         kind: 'message',
         id: item.id,

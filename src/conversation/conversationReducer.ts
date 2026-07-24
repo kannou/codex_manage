@@ -17,6 +17,7 @@ interface ItemState {
 export interface ConversationReducerState {
   readonly thread: Thread;
   readonly items: ReadonlyMap<string, ItemState>;
+  readonly lingeringCompletedCommandIds: ReadonlySet<string>;
   readonly needsResync: boolean;
 }
 
@@ -50,6 +51,7 @@ export function createConversationReducerState(thread: Thread): ConversationRedu
   return {
     thread,
     items,
+    lingeringCompletedCommandIds: deriveLingeringCompletedCommandIds(thread),
     needsResync: needsResync ||
       activeTurns > 1 ||
       (activeTurns > 0 && thread.status.type !== 'active')
@@ -165,9 +167,22 @@ function reduceTurnStarted(
   const items = replaceTurnItemStates(state.items, incoming.id, merged.items, 'started');
   const thread = upsertTurn(state.thread, merged);
   const activeCount = thread.turns.filter((turn) => turn.status === 'inProgress').length;
+  const existingItems = new Map(existing?.items.map((item) => [item.id, item]) ?? []);
+  const startsNextActivity = incoming.items.some((item) => {
+    const current = existingItems.get(item.id);
+    if (item.type === 'commandExecution') {
+      return current === undefined;
+    }
+    return item.type === 'agentMessage' &&
+      item.text.trim().length > 0 &&
+      (current?.type !== 'agentMessage' || current.text.trim().length === 0);
+  });
   return {
     thread,
     items,
+    lingeringCompletedCommandIds: startsNextActivity
+      ? clearLingeringCompletedCommands(state)
+      : state.lingeringCompletedCommandIds,
     needsResync: state.needsResync || incoming.status !== 'inProgress' || activeCount > 1
   };
 }
@@ -195,6 +210,7 @@ function reduceTurnCompleted(
   return {
     thread: upsertTurn(state.thread, completed),
     items: replaceTurnItemStates(state.items, incoming.id, completed.items, 'completed'),
+    lingeringCompletedCommandIds: new Set(),
     needsResync: state.needsResync || !isTerminalTurn(incoming)
   };
 }
@@ -224,6 +240,11 @@ function reduceItemStarted(
   return {
     thread: upsertTurn(state.thread, updatedTurn),
     items,
+    lingeringCompletedCommandIds:
+      incoming.type === 'commandExecution' ||
+      (incoming.type === 'agentMessage' && incoming.text.trim().length > 0)
+        ? clearLingeringCompletedCommands(state)
+        : state.lingeringCompletedCommandIds,
     needsResync: state.needsResync || conflict
   };
 }
@@ -250,9 +271,25 @@ function reduceItemCompleted(
   }
   const items = new Map(state.items);
   items.set(incoming.id, { turnId, lifecycle: 'completed' });
+  let lingeringCompletedCommandIds = state.lingeringCompletedCommandIds;
+  if (incoming.type === 'commandExecution') {
+    if (!current) {
+      lingeringCompletedCommandIds = clearLingeringCompletedCommands(state);
+    }
+    const nextIds = new Set(lingeringCompletedCommandIds);
+    if (incoming.status === 'completed') {
+      nextIds.add(incoming.id);
+    } else {
+      nextIds.delete(incoming.id);
+    }
+    lingeringCompletedCommandIds = nextIds;
+  } else if (incoming.type === 'agentMessage' && incoming.text.trim().length > 0) {
+    lingeringCompletedCommandIds = clearLingeringCompletedCommands(state);
+  }
   return {
     thread: upsertTurn(state.thread, upsertItem(target, incoming)),
     items,
+    lingeringCompletedCommandIds,
     needsResync: state.needsResync
   };
 }
@@ -293,6 +330,9 @@ function reduceAgentMessageDelta(
   return {
     thread: upsertTurn(state.thread, upsertItem(target, message)),
     items,
+    lingeringCompletedCommandIds: delta.trim().length > 0
+      ? clearLingeringCompletedCommands(state)
+      : state.lingeringCompletedCommandIds,
     needsResync: state.needsResync
   };
 }
@@ -339,8 +379,36 @@ function reduceReasoningSummaryUpdate(
   return {
     thread: upsertTurn(state.thread, upsertItem(target, reasoning)),
     items,
+    lingeringCompletedCommandIds: state.lingeringCompletedCommandIds,
     needsResync: state.needsResync
   };
+}
+
+function deriveLingeringCompletedCommandIds(thread: Thread): ReadonlySet<string> {
+  const activeTurns = thread.turns.filter((turn) => turn.status === 'inProgress');
+  if (activeTurns.length !== 1) {
+    return new Set();
+  }
+
+  const items = activeTurns[0]?.items ?? [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.type === 'agentMessage' && item.text.trim().length > 0) {
+      return new Set();
+    }
+    if (item?.type === 'commandExecution') {
+      return item.status === 'completed' ? new Set([item.id]) : new Set();
+    }
+  }
+  return new Set();
+}
+
+function clearLingeringCompletedCommands(
+  state: ConversationReducerState
+): ReadonlySet<string> {
+  return state.lingeringCompletedCommandIds.size === 0
+    ? state.lingeringCompletedCommandIds
+    : new Set();
 }
 
 function mergeStartedTurn(existing: Turn, incoming: Turn): Turn {

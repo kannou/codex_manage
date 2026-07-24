@@ -167,7 +167,11 @@ export class ConversationSession {
 
   public snapshot(): ConversationSessionSnapshot {
     return {
-      model: toConversationViewModel(this.reducer.thread, this.workspaceFolders),
+      model: toConversationViewModel(
+        this.reducer.thread,
+        this.workspaceFolders,
+        this.reducer.lingeringCompletedCommandIds
+      ),
       revision: this.revision,
       sync: this.sync,
       operation: this.operation,
