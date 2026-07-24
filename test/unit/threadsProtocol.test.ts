@@ -65,6 +65,8 @@ const conversationState = {
 test('accepts only the explicit sidebar navigation messages', () => {
   for (const message of [
     { type: 'threads/ready' },
+    { type: 'threads/viewFocus', focused: true },
+    { type: 'threads/viewFocus', focused: false },
     { type: 'threads/new' },
     { type: 'threads/open', threadId: 'thread-1' },
     { type: 'threads/back' },
@@ -74,6 +76,8 @@ test('accepts only the explicit sidebar navigation messages', () => {
   }
 
   assert.equal(isThreadsWebviewMessage({ type: 'threads/open', threadId: '' }), false);
+  assert.equal(isThreadsWebviewMessage({ type: 'threads/viewFocus', focused: 'yes' }), false);
+  assert.equal(isThreadsWebviewMessage({ type: 'threads/viewFocus', focused: true, threadId: 'thread-1' }), false);
   assert.equal(isThreadsWebviewMessage({ type: 'threads/new', method: 'thread/start' }), false);
   assert.equal(isThreadsWebviewMessage({ type: 'threads/execute', command: 'anything' }), false);
 });
@@ -97,6 +101,18 @@ test('requires thread IDs only for thread-scoped management actions', () => {
 });
 
 test('accepts bounded composer actions and rejects arbitrary conversation payloads', () => {
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/seen',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    turnId: 'turn-1'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/seen',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    turnId: ''
+  }), false);
   assert.equal(isThreadsWebviewMessage({
     type: 'threads/conversation/copy', sessionId: 'session-1', threadId: 'thread-1',
     turnId: 'turn-1', itemId: 'message-1', codeBlockIndex: 0
