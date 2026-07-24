@@ -77,6 +77,7 @@ export interface ConversationScreenState {
   readonly execution: ConversationExecutionViewModel;
   readonly runtime: ConversationRuntimeSettings;
   readonly availableAdditions: readonly ConversationAdditionKind[];
+  readonly draftText: string;
   readonly attachments: readonly ConversationAttachmentViewModel[];
   readonly interactions: readonly ConversationInteractionViewModel[];
   readonly bookmarkedTurnIds: readonly string[];
@@ -141,6 +142,12 @@ export type ThreadsWebviewToHostMessage =
     readonly sessionId: string;
     readonly threadId: string;
     readonly requestId: string;
+    readonly text: string;
+  }
+  | {
+    readonly type: 'threads/conversation/draft/update';
+    readonly sessionId: string;
+    readonly threadId: string;
     readonly text: string;
   }
   | {
@@ -338,6 +345,15 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       value.text.length <= MAX_COMPOSER_TEXT_LENGTH
     );
   }
+  if (value.type === 'threads/conversation/draft/update') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'text']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      typeof value.text === 'string' &&
+      value.text.length <= MAX_COMPOSER_TEXT_LENGTH
+    );
+  }
   if (value.type === 'threads/conversation/rename') {
     return (
       hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'name']) &&
@@ -506,6 +522,8 @@ export function isConversationScreenState(value: unknown): value is Conversation
     value.availableAdditions.every((addition) => (
       addition === 'localImage' || addition === 'mention' || addition === 'skill'
     )) &&
+    typeof value.draftText === 'string' &&
+    value.draftText.length <= MAX_COMPOSER_TEXT_LENGTH &&
     Array.isArray(value.attachments) &&
     value.attachments.length <= 40 &&
     value.attachments.every(isConversationAttachment) &&

@@ -103,6 +103,7 @@ let hasRenderedConversation = false;
 let lastAnnouncedCompletedTurnId: string | undefined;
 let lastReportedSeenTurnId: string | undefined;
 let conversationLatestState: ConversationLatestState = createConversationLatestState();
+let restoredConversationDraftKey: string | undefined;
 let pendingConversationSend: PendingConversationSend | undefined;
 let pendingConversationStopRequestId: string | undefined;
 let pendingThreadCardFocus: ThreadCardFocus | undefined;
@@ -305,6 +306,7 @@ app.addEventListener('keydown', (event) => {
 
 app.addEventListener('input', (event) => {
   if (event.target === conversationComposerTarget?.input) {
+    updateConversationDraft();
     updateConversationComposer();
   }
 });
@@ -845,6 +847,7 @@ function beginConversationSession(sessionId: string): void {
   lastReportedSeenTurnId = undefined;
   conversationLatestState = createConversationLatestState();
   if (conversationLatestButton) conversationLatestButton.hidden = true;
+  restoredConversationDraftKey = undefined;
   pendingConversationSend = undefined;
   pendingConversationStopRequestId = undefined;
   clearConversationOperationError();
@@ -873,6 +876,7 @@ function resetConversationContext(): void {
   lastAnnouncedCompletedTurnId = undefined;
   lastReportedSeenTurnId = undefined;
   conversationLatestState = createConversationLatestState();
+  restoredConversationDraftKey = undefined;
   pendingConversationSend = undefined;
   pendingConversationStopRequestId = undefined;
 }
@@ -945,6 +949,11 @@ function queueConversationState(state: ConversationScreenState): void {
   conversationScreenState = state;
   pendingConversationState = state;
   persistConversation(state.model);
+  const draftKey = `${state.sessionId}\0${state.model.threadId}`;
+  if (restoredConversationDraftKey !== draftKey && conversationComposerTarget) {
+    conversationComposerTarget.input.value = state.draftText;
+    restoredConversationDraftKey = draftKey;
+  }
   updateConversationComposer();
   if (pendingConversationFrame === undefined) {
     pendingConversationFrame = requestAnimationFrame(renderPendingConversationState);
@@ -1194,6 +1203,19 @@ function submitConversation(): void {
     threadId,
     requestId,
     text
+  });
+}
+
+function updateConversationDraft(): void {
+  const target = conversationComposerTarget;
+  const sessionId = conversationSessionId;
+  const threadId = conversationThreadId;
+  if (!target || !sessionId || !threadId || pendingConversationSend) return;
+  vscode.postMessage({
+    type: 'threads/conversation/draft/update',
+    sessionId,
+    threadId,
+    text: target.input.value
   });
 }
 
