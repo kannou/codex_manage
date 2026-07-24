@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import * as vscode from 'vscode';
 import type { Thread } from '../../src/codex/protocol/generated/v2/Thread';
@@ -539,6 +542,223 @@ test('adds host-selected file references and Skills and restores them after a fa
     transition.state.attachments.map(({ kind, name }) => ({ kind, name })),
     [{ kind: 'mention', name: 'AGENTS.md' }, { kind: 'skill', name: 'review' }]
   );
+});
+
+test('restores isolated per-thread drafts and clears them only after an accepted send', async (t) => {
+  setWorkspace();
+  const draftDirectory = mkdtempSync(join(tmpdir(), 'codex-thread-draft-'));
+  t.after(() => rmSync(draftDirectory, { recursive: true, force: true }));
+  const imagePath = join(draftDirectory, 'diagram.png');
+  const mentionPath = join(draftDirectory, 'AGENTS.md');
+  const skillPath = join(draftDirectory, 'SKILL.md');
+  writeFileSync(imagePath, 'png');
+  writeFileSync(mentionPath, 'context');
+  writeFileSync(skillPath, '# Test skill');
+
+  let rejectSend = true;
+  const client: ConversationSessionClient = {
+    ...fakeConversationClient(async (threadId) => createThread({ id: threadId })),
+    listModels: async () => ({ data: [runtimeModel()], nextCursor: null }),
+    startTurn: async () => {
+      if (rejectSend) throw new Error('send failed');
+      return {
+        turn: createTurn({
+          id: 'turn-accepted',
+          status: 'inProgress',
+          completedAt: null,
+          durationMs: null,
+          items: []
+        })
+      };
+    }
+  };
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: client,
+    pickLocalImages: async () => [{ path: imagePath, sizeBytes: 3 }],
+    pickMentionFiles: async () => [{ path: mentionPath, sizeBytes: 7 }],
+    pickSkills: async () => [{ name: 'test', path: skillPath, description: 'Test draft restoration' }],
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(
+    displayThread('thread-1', 'Thread 1'),
+    displayThread('thread-2', 'Thread 2')
+  ));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const first = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { sessionId: string } };
+  view.webview.fire({
+    type: 'threads/conversation/draft/update',
+    sessionId: first.state.sessionId,
+    threadId: 'thread-1',
+    text: 'Draft for thread one'
+  });
+  for (const type of [
+    'threads/conversation/attachment/addImage',
+    'threads/conversation/attachment/addMention',
+    'threads/conversation/attachment/addSkill'
+  ]) {
+    view.webview.fire({ type, sessionId: first.state.sessionId, threadId: 'thread-1' });
+    await flushPromises();
+  }
+
+  view.webview.fire({ type: 'threads/back' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-2' });
+  await flushPromises();
+  const second = [...view.webview.postedMessages].reverse().find(
+    (message) => (
+      (message as { type?: unknown; state?: { model?: { threadId?: unknown } } }).type ===
+        'threads/conversationLoaded' &&
+      (message as { state: { model: { threadId: string } } }).state.model.threadId === 'thread-2'
+    )
+  ) as { state: { sessionId: string } };
+  view.webview.fire({
+    type: 'threads/conversation/draft/update',
+    sessionId: second.state.sessionId,
+    threadId: 'thread-2',
+    text: 'Different draft'
+  });
+  view.webview.fire({ type: 'threads/back' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+
+  const restored = [...view.webview.postedMessages].reverse().find(
+    (message) => (
+      (message as { type?: unknown; state?: { model?: { threadId?: unknown } } }).type ===
+        'threads/conversationLoaded' &&
+      (message as { state: { model: { threadId: string } } }).state.model.threadId === 'thread-1'
+    )
+  ) as { state: {
+    sessionId: string;
+    draftText: string;
+    attachments: Array<{ kind: string; name: string }>;
+  } };
+  assert.equal(restored.state.draftText, 'Draft for thread one');
+  assert.deepEqual(
+    restored.state.attachments.map(({ kind, name }) => ({ kind, name })),
+    [
+      { kind: 'localImage', name: 'diagram.png' },
+      { kind: 'mention', name: 'AGENTS.md' },
+      { kind: 'skill', name: 'test' }
+    ]
+  );
+  assert.equal(JSON.stringify(restored).includes(draftDirectory), false);
+
+  view.webview.fire({
+    type: 'threads/conversation/send',
+    sessionId: restored.state.sessionId,
+    threadId: 'thread-1',
+    requestId: 'draft-send-failed',
+    text: 'Draft for thread one'
+  });
+  await flushPromises();
+  view.webview.fire({ type: 'threads/back' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const afterFailure = [...view.webview.postedMessages].reverse().find(
+    (message) => (
+      (message as { type?: unknown; state?: { model?: { threadId?: unknown } } }).type ===
+        'threads/conversationLoaded' &&
+      (message as { state: { model: { threadId: string } } }).state.model.threadId === 'thread-1'
+    )
+  ) as { state: { sessionId: string; draftText: string; attachments: unknown[] } };
+  assert.equal(afterFailure.state.draftText, 'Draft for thread one');
+  assert.equal(afterFailure.state.attachments.length, 3);
+
+  rejectSend = false;
+  view.webview.fire({ type: 'threads/reload' });
+  await flushPromises();
+  view.webview.fire({
+    type: 'threads/conversation/send',
+    sessionId: afterFailure.state.sessionId,
+    threadId: 'thread-1',
+    requestId: 'draft-send-accepted',
+    text: 'Draft for thread one'
+  });
+  await flushPromises();
+  const accepted = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { requestId?: unknown }).requestId === 'draft-send-accepted'
+  ) as { outcome?: string } | undefined;
+  assert.equal(accepted?.outcome, 'accepted');
+  view.webview.fire({ type: 'threads/back' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const afterSuccess = [...view.webview.postedMessages].reverse().find(
+    (message) => (
+      (message as { type?: unknown; state?: { model?: { threadId?: unknown } } }).type ===
+        'threads/conversationLoaded' &&
+      (message as { state: { model: { threadId: string } } }).state.model.threadId === 'thread-1'
+    )
+  ) as { state: { draftText: string; attachments: unknown[] } };
+  assert.equal(afterSuccess.state.draftText, '');
+  assert.deepEqual(afterSuccess.state.attachments, []);
+});
+
+test('drops unavailable draft attachments and archived-thread drafts with a safe notice', async (t) => {
+  setWorkspace();
+  const draftDirectory = mkdtempSync(join(tmpdir(), 'codex-thread-invalid-draft-'));
+  t.after(() => rmSync(draftDirectory, { recursive: true, force: true }));
+  const mentionPath = join(draftDirectory, 'temporary.txt');
+  writeFileSync(mentionPath, 'temporary context');
+
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
+    pickMentionFiles: async () => [{ path: mentionPath, sizeBytes: 17 }],
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  const activeThread = displayThread('thread-1', 'Thread 1');
+  provider.setSnapshot(snapshot(activeThread));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const loaded = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { sessionId: string } };
+  view.webview.fire({
+    type: 'threads/conversation/draft/update',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    text: 'Keep only while active'
+  });
+  view.webview.fire({
+    type: 'threads/conversation/attachment/addMention',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1'
+  });
+  await flushPromises();
+  rmSync(mentionPath);
+
+  view.webview.fire({ type: 'threads/back' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const withoutMissingFile = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { sessionId: string; draftText: string; attachments: unknown[]; notice?: string } };
+  assert.equal(withoutMissingFile.state.draftText, 'Keep only while active');
+  assert.deepEqual(withoutMissingFile.state.attachments, []);
+  assert.match(withoutMissingFile.state.notice ?? '', /draft attachments were removed/iu);
+  assert.equal(JSON.stringify(withoutMissingFile).includes(draftDirectory), false);
+
+  view.webview.fire({ type: 'threads/back' });
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1', { archived: true })));
+  provider.setSnapshot(snapshot(activeThread));
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const afterArchive = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { draftText: string; attachments: unknown[] } };
+  assert.equal(afterArchive.state.draftText, '');
+  assert.deepEqual(afterArchive.state.attachments, []);
 });
 
 test('keeps a new-conversation draft after creation failure and isolates a late success after Back', async (t) => {

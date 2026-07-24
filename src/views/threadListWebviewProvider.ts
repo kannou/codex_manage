@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { basename, extname, isAbsolute, normalize } from 'node:path';
 import * as vscode from 'vscode';
 import type { AppServerNotification, AppServerRequest } from '../codex/appServerClient';
@@ -130,6 +131,12 @@ interface SkillAttachment {
 
 type ConversationAttachment = LocalImageAttachment | MentionAttachment | SkillAttachment;
 
+interface ConversationDraft {
+  text: string;
+  attachments: ConversationAttachment[];
+  notice?: string;
+}
+
 interface PendingConversationLoad {
   readonly generation: number;
   readonly sessionId: string;
@@ -159,6 +166,7 @@ interface NewConversationDraft {
   runtimeLoadVersion: number;
   createPending: boolean;
   createdThread: Thread | undefined;
+  text: string;
   readonly attachments: ConversationAttachment[];
   readonly notifications: ConversationNotification[];
   overflowed: boolean;
@@ -198,7 +206,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private viewReady = false;
   private generation = 0;
   private conversationViewRevision = 0;
-  private conversationAttachments: ConversationAttachment[] = [];
+  private readonly conversationDrafts = new Map<string, ConversationDraft>();
   private readonly pendingBookmarkUpdates = new Set<string>();
   private readonly latestCompletedTurnByThread = new Map<string, string>();
   private readonly unreadCompletedTurnByThread = new Map<string, string>();
@@ -278,6 +286,13 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
               message.sessionId,
               message.threadId,
               message.requestId,
+              message.text
+            );
+            return;
+          case 'threads/conversation/draft/update':
+            this.updateConversationDraft(
+              message.sessionId,
+              message.threadId,
               message.text
             );
             return;
@@ -363,6 +378,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
 
   public setSnapshot(snapshot: ThreadRepositorySnapshot): void {
     this.snapshot = snapshot;
+    for (const thread of snapshot.archive.threads) {
+      this.conversationDrafts.delete(thread.id);
+    }
     for (const [threadId, session] of this.conversationSessions) {
       const reference = this.findThread(threadId);
       if (reference) {
@@ -515,8 +533,16 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       isJsonObject(notification.params) &&
       typeof notification.params.threadId === 'string'
     ) {
+      this.conversationDrafts.delete(notification.params.threadId);
       this.latestCompletedTurnByThread.delete(notification.params.threadId);
       this.markCompletedTurnSeen(notification.params.threadId);
+    }
+    if (
+      notification.method === 'thread/archived' &&
+      isJsonObject(notification.params) &&
+      typeof notification.params.threadId === 'string'
+    ) {
+      this.conversationDrafts.delete(notification.params.threadId);
     }
     if (notification.method === 'serverRequest/resolved' && isJsonObject(notification.params)) {
       const resolvedId = notification.params.requestId;
@@ -641,6 +667,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.pendingRestoreThreadId = undefined;
     this.interactions.clear();
     this.pendingNewConversations.clear();
+    this.conversationDrafts.clear();
     this.latestCompletedTurnByThread.clear();
     this.unreadCompletedTurnByThread.clear();
     this.updateUnreadCompletionPresentation();
@@ -663,6 +690,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.pendingRestoreThreadId = undefined;
     this.interactions.clear();
     this.pendingNewConversations.clear();
+    this.conversationDrafts.clear();
     this.latestCompletedTurnByThread.clear();
     this.unreadCompletedTurnByThread.clear();
     this.viewReady = false;
@@ -697,6 +725,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     const sessionId = randomUUID();
     this.conversationSessionId = sessionId;
     this.activeThread = { id: reference.id, title: reference.title };
+    this.restoreConversationDraft(reference.id, true);
     this.setConversationScreenOpen(true);
     this.post({
       type: 'threads/conversationLoading',
@@ -819,6 +848,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       runtimeLoadVersion: 0,
       createPending: false,
       createdThread: undefined,
+      text: '',
       attachments: [],
       notifications: [],
       overflowed: false,
@@ -993,6 +1023,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       draft.sessionId === sessionId &&
       draft.draftId === threadId
     ) {
+      draft.text = text ?? '';
       this.createNewConversation(draft, requestId, text ?? '');
       return;
     }
@@ -1003,10 +1034,14 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       );
       return;
     }
+    const conversationDraft = this.restoreConversationDraft(threadId);
+    if (operation === 'send') {
+      conversationDraft.text = text ?? '';
+    }
 
     if (
       operation === 'send' &&
-      this.conversationAttachments.some((attachment) => attachment.kind === 'localImage') &&
+      conversationDraft.attachments.some((attachment) => attachment.kind === 'localImage') &&
       !session.supportsImageInput()
     ) {
       this.post({
@@ -1023,14 +1058,14 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
 
     const generation = this.generation;
     const result = operation === 'send'
-      ? session.send(text ?? '', this.conversationAttachments.map(toAdditionalInput))
+      ? session.send(text ?? '', conversationDraft.attachments.map(toAdditionalInput))
       : session.stop();
     void result.then((accepted) => {
+      if (operation === 'send' && accepted) {
+        this.conversationDrafts.delete(threadId);
+      }
       if (!this.isCurrentConversation(generation, threadId, sessionId)) {
         return;
-      }
-      if (operation === 'send' && accepted) {
-        this.conversationAttachments = [];
       }
       this.flushConversationStatePost();
       this.post(accepted
@@ -1054,6 +1089,16 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
             : 'The running turn could not be stopped. Reload the conversation and try again.'
         });
     });
+  }
+
+  private updateConversationDraft(sessionId: string, threadId: string, text: string): void {
+    if (!this.isCurrentSession(sessionId, threadId)) return;
+    const draft = this.newConversationDraft;
+    if (draft?.sessionId === sessionId && draft.draftId === threadId) {
+      if (!draft.createPending) draft.text = text;
+      return;
+    }
+    this.restoreConversationDraft(threadId).text = text;
   }
 
   private updateConversationSettings(
@@ -1131,7 +1176,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
           ? !draft || draft.createPending || !draftSupportsImageInput(draft)
           : !session || session.snapshot().operation !== 'idle' || !session.supportsImageInput())
       ) return;
-      const attachments = isDraft ? draft?.attachments : this.conversationAttachments;
+      const attachments = isDraft ? draft?.attachments : this.restoreConversationDraft(threadId).attachments;
       if (!attachments) return;
       const initialCount = attachments.length;
       let rejected = false;
@@ -1186,7 +1231,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         !this.isCurrentSession(sessionId, threadId) ||
         (isDraft ? !draft || draft.createPending : !session || session.snapshot().operation !== 'idle')
       ) return;
-      const attachments = isDraft ? draft?.attachments : this.conversationAttachments;
+      const attachments = isDraft ? draft?.attachments : this.restoreConversationDraft(threadId).attachments;
       if (!attachments) return;
       const initialCount = attachments.length;
       let rejected = false;
@@ -1246,7 +1291,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         !this.isCurrentSession(sessionId, threadId) ||
         (isDraft ? !draft || draft.createPending : !session || session.snapshot().operation !== 'idle')
       ) return;
-      const attachments = isDraft ? draft?.attachments : this.conversationAttachments;
+      const attachments = isDraft ? draft?.attachments : this.restoreConversationDraft(threadId).attachments;
       if (!attachments) return;
       const initialCount = attachments.length;
       let rejected = false;
@@ -1325,7 +1370,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     ) return;
     const attachments = draft?.sessionId === sessionId && draft.draftId === threadId
       ? draft.attachments
-      : this.conversationAttachments;
+      : this.restoreConversationDraft(threadId).attachments;
     const index = attachments.findIndex((attachment) => attachment.id === attachmentId);
     if (index < 0) return;
     attachments.splice(index, 1);
@@ -1345,6 +1390,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     requestId: string,
     text: string
   ): void {
+    draft.text = text;
     if (
       this.isCurrentDraft(draft) &&
       draft.attachments.some((attachment) => attachment.kind === 'localImage') &&
@@ -1466,7 +1512,15 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.conversationSessions.set(thread.id, session);
     if (!this.isCurrentDraft(draft)) return;
 
-    this.conversationAttachments = turnStarted ? [] : [...draft.attachments];
+    if (turnStarted) {
+      this.conversationDrafts.delete(thread.id);
+    } else {
+      const conversationDraft: ConversationDraft = {
+        text: draft.text,
+        attachments: [...draft.attachments]
+      };
+      this.conversationDrafts.set(thread.id, conversationDraft);
+    }
     this.newConversationDraft = undefined;
     this.activeThread = { id: thread.id, title: conversationTitle(thread) };
     this.attachConversationSession(
@@ -1616,13 +1670,43 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.conversationSession = undefined;
     this.conversationSessionId = undefined;
     this.newConversationDraft = undefined;
-    this.conversationAttachments = [];
     this.pendingConversationLoad = undefined;
     this.pendingConversationPost = undefined;
     if (this.conversationPostTimer !== undefined) {
       clearTimeout(this.conversationPostTimer);
       this.conversationPostTimer = undefined;
     }
+  }
+
+  private restoreConversationDraft(threadId: string, validateFiles = false): ConversationDraft {
+    let draft = this.conversationDrafts.get(threadId);
+    if (!draft) {
+      draft = { text: '', attachments: [] };
+      this.conversationDrafts.set(threadId, draft);
+    }
+    if (!validateFiles || draft.attachments.length === 0) return draft;
+
+    const counts = { localImage: 0, mention: 0, skill: 0 };
+    const paths = new Set<string>();
+    const attachments = draft.attachments.filter((attachment) => {
+      const limit = attachment.kind === 'localImage'
+        ? MAX_LOCAL_IMAGE_ATTACHMENTS
+        : attachment.kind === 'mention'
+          ? MAX_MENTION_ATTACHMENTS
+          : MAX_SKILL_ATTACHMENTS;
+      const path = localPathKey(attachment.path);
+      if (counts[attachment.kind] >= limit || paths.has(path) || !isRestorableAttachment(attachment)) {
+        return false;
+      }
+      counts[attachment.kind] += 1;
+      paths.add(path);
+      return true;
+    });
+    if (attachments.length !== draft.attachments.length) {
+      draft.attachments = attachments;
+      draft.notice = 'Some draft attachments were removed because they are no longer available or valid.';
+    }
+    return draft;
   }
 
   private queueConversationStatePost(pending: PendingConversationPost): void {
@@ -1718,6 +1802,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       execution,
       runtime: draft.runtime,
       availableAdditions: this.availableAdditions(draftSupportsImageInput(draft)),
+      draftText: draft.text,
       attachments: draft.attachments.map(toAttachmentViewModel),
       interactions: [],
       bookmarkedTurnIds: [],
@@ -1730,6 +1815,18 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     const bookmarkedTurnIds = (this.options.turnBookmarkStore?.getBookmarkedTurnIds(
       snapshot.model.threadId
     ) ?? []).filter((turnId) => visibleTurnIds.has(turnId));
+    const draft = this.restoreConversationDraft(snapshot.model.threadId);
+    const supportsImageInput = Boolean(
+      snapshot.runtime.status === 'ready' && this.conversationSession?.supportsImageInput()
+    );
+    if (
+      snapshot.runtime.status === 'ready' &&
+      !supportsImageInput &&
+      draft.attachments.some((attachment) => attachment.kind === 'localImage')
+    ) {
+      draft.attachments = draft.attachments.filter((attachment) => attachment.kind !== 'localImage');
+      draft.notice = 'Draft images were removed because the selected model does not support image input.';
+    }
     return toConversationScreenState(
       sessionId,
       snapshot,
@@ -1737,11 +1834,11 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         .filter((interaction) => interaction.threadId === snapshot.model.threadId)
         .map((interaction) => interaction.view),
       ++this.conversationViewRevision,
-      this.availableAdditions(Boolean(
-        snapshot.runtime.status === 'ready' && this.conversationSession?.supportsImageInput()
-      )),
-      this.conversationAttachments.map(toAttachmentViewModel),
-      bookmarkedTurnIds
+      this.availableAdditions(supportsImageInput),
+      draft.text,
+      draft.attachments.map(toAttachmentViewModel),
+      bookmarkedTurnIds,
+      draft.notice
     );
   }
 
@@ -2083,6 +2180,26 @@ function validatePickedSkill(skill: PickedSkill): Omit<SkillAttachment, 'id' | '
   };
 }
 
+function isRestorableAttachment(attachment: ConversationAttachment): boolean {
+  try {
+    const stat = statSync(attachment.path);
+    if (!stat.isFile()) return false;
+    if (attachment.kind === 'localImage') {
+      return (
+        stat.size > 0 &&
+        stat.size <= MAX_LOCAL_IMAGE_SIZE_BYTES &&
+        LOCAL_IMAGE_EXTENSIONS.has(extname(attachment.path).toLowerCase())
+      );
+    }
+    if (attachment.kind === 'mention') {
+      return stat.size > 0 && stat.size <= MAX_MENTION_FILE_SIZE_BYTES;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function localPathKey(path: string): string {
   const normalized = normalize(path);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
@@ -2145,11 +2262,14 @@ function toConversationScreenState(
   interactions: ConversationScreenState['interactions'],
   revision: number,
   availableAdditions: ConversationScreenState['availableAdditions'],
+  draftText: string,
   attachments: ConversationScreenState['attachments'],
-  bookmarkedTurnIds: ConversationScreenState['bookmarkedTurnIds']
+  bookmarkedTurnIds: ConversationScreenState['bookmarkedTurnIds'],
+  draftNotice?: string
 ): ConversationScreenState {
   const execution = toConversationExecution(snapshot);
-  return snapshot.notice
+  const notice = [snapshot.notice, draftNotice].filter((value) => value?.trim()).join(' ');
+  return notice
     ? {
       sessionId,
       revision,
@@ -2157,10 +2277,11 @@ function toConversationScreenState(
       execution,
       runtime: snapshot.runtime,
       availableAdditions,
+      draftText,
       attachments,
       interactions,
       bookmarkedTurnIds,
-      notice: snapshot.notice
+      notice
     }
     : {
       sessionId,
@@ -2169,6 +2290,7 @@ function toConversationScreenState(
       execution,
       runtime: snapshot.runtime,
       availableAdditions,
+      draftText,
       attachments,
       interactions,
       bookmarkedTurnIds

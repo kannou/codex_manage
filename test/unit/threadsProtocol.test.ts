@@ -53,6 +53,7 @@ const conversationState = {
     message: null
   },
   availableAdditions: ['localImage', 'mention', 'skill'],
+  draftText: 'Continue this thread',
   attachments: [
     { id: 'attachment-1', kind: 'localImage', name: 'diagram.png', sizeBytes: 1024 },
     { id: 'attachment-2', kind: 'mention', name: 'AGENTS.md', sizeBytes: 2048 },
@@ -148,6 +149,25 @@ test('accepts bounded composer actions and rejects arbitrary conversation payloa
     requestId: 'request-1',
     text: 'Continue this thread'
   }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/draft/update',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    text: ''
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/draft/update',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    text: 'x'.repeat(MAX_COMPOSER_TEXT_LENGTH + 1)
+  }), false);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/draft/update',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    text: 'Keep this private',
+    path: '/private/draft.txt'
+  }), false);
   assert.equal(isThreadsWebviewMessage({
     type: 'threads/conversation/attachment/addImage',
     sessionId: 'session-1',
@@ -411,6 +431,15 @@ test('validates persisted navigation state and host messages', () => {
     type: 'threads/conversationState',
     state: { ...conversationState, revision: -1 }
   }), false);
+  const { draftText: _draftText, ...withoutDraftText } = conversationState;
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: withoutDraftText
+  }), false);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: { ...conversationState, draftText: 'x'.repeat(MAX_COMPOSER_TEXT_LENGTH + 1) }
+  }), false);
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',
     state: {
@@ -485,7 +514,9 @@ test('restores group visibility and migrates version 1 navigation state', () => 
     screen: 'list',
     selectedThreadId: 'thread-1',
     listScrollTop: 80,
-    expandedGroups: { pinned: false, active: true, archive: true }
+    expandedGroups: { pinned: false, active: true, archive: true },
+    draftText: 'must not persist',
+    attachments: [{ path: '/private/file.txt' }]
   }), {
     version: 2,
     screen: 'list',
