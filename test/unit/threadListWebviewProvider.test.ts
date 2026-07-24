@@ -44,15 +44,30 @@ class FakeWebview {
 
 class FakeWebviewView {
   public readonly webview = new FakeWebview();
-  private readonly listeners = new Set<Listener<void>>();
+  public visible = true;
+  public badge: vscode.ViewBadge | undefined;
+  private readonly disposeListeners = new Set<Listener<void>>();
+  private readonly visibilityListeners = new Set<Listener<void>>();
 
   public onDidDispose(listener: Listener<void>): vscode.Disposable {
-    this.listeners.add(listener);
-    return { dispose: () => this.listeners.delete(listener) };
+    this.disposeListeners.add(listener);
+    return { dispose: () => this.disposeListeners.delete(listener) };
+  }
+
+  public onDidChangeVisibility(listener: Listener<void>): vscode.Disposable {
+    this.visibilityListeners.add(listener);
+    return { dispose: () => this.visibilityListeners.delete(listener) };
+  }
+
+  public setVisible(visible: boolean): void {
+    this.visible = visible;
+    for (const listener of this.visibilityListeners) {
+      listener();
+    }
   }
 
   public dispose(): void {
-    for (const listener of this.listeners) {
+    for (const listener of this.disposeListeners) {
       listener();
     }
   }
@@ -1107,6 +1122,183 @@ test('replays conversation notifications received while the initial history read
     loaded?.state?.model?.turns?.[0]?.items[0]?.text,
     'Completed while loading'
   );
+});
+
+test('shows a completion badge only when the active conversation is not being viewed', async (t) => {
+  setWorkspace();
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async (threadId) => createThread({
+      id: threadId,
+      status: { type: 'active', activeFlags: [] },
+      turns: [createTurn({
+        id: 'turn-live',
+        status: 'inProgress',
+        completedAt: null,
+        durationMs: null,
+        items: []
+      })]
+    })),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/viewFocus', focused: true });
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+
+  const loaded = view.webview.postedMessages.find((message) => (
+    (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  )) as { state: { sessionId: string } } | undefined;
+  assert.ok(loaded);
+
+  provider.handleNotification({
+    method: 'turn/completed',
+    params: {
+      threadId: 'thread-1',
+      turn: createTurn({
+        id: 'turn-live',
+        items: [{
+          type: 'agentMessage',
+          id: 'agent-live',
+          text: 'Completed while reading',
+          phase: 'final_answer',
+          memoryCitation: null
+        }]
+      })
+    }
+  });
+  assert.equal(view.badge, undefined);
+
+  view.webview.fire({ type: 'threads/viewFocus', focused: false });
+  provider.handleNotification({
+    method: 'turn/completed',
+    params: {
+      threadId: 'thread-1',
+      turn: createTurn({ id: 'turn-unseen', items: [] })
+    }
+  });
+  assert.deepEqual(view.badge, {
+    value: 1,
+    tooltip: '1 completed conversation to review'
+  });
+
+  view.webview.fire({
+    type: 'threads/conversation/seen',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-unseen'
+  });
+  assert.deepEqual(view.badge, {
+    value: 1,
+    tooltip: '1 completed conversation to review'
+  });
+
+  view.webview.fire({ type: 'threads/viewFocus', focused: true });
+  view.webview.fire({
+    type: 'threads/conversation/seen',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-unseen'
+  });
+  assert.equal(view.badge, undefined);
+
+  provider.handleNotification({
+    method: 'turn/completed',
+    params: {
+      threadId: 'thread-1',
+      turn: createTurn({ id: 'turn-unseen', items: [] })
+    }
+  });
+  assert.equal(view.badge, undefined);
+});
+
+test('tracks unseen completions by thread and clears only the reviewed thread', async (t) => {
+  setWorkspace();
+  const completedTurns = new Map([
+    ['thread-1', 'turn-1'],
+    ['thread-2', 'turn-2']
+  ]);
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async (threadId) => createThread({
+      id: threadId,
+      turns: [createTurn({ id: completedTurns.get(threadId) ?? 'turn-unknown' })]
+    })),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(
+    displayThread('thread-1', 'Thread 1'),
+    displayThread('thread-2', 'Thread 2')
+  ));
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/viewFocus', focused: false });
+  view.webview.fire({ type: 'threads/ready' });
+
+  view.setVisible(false);
+  for (const [threadId, turnId] of completedTurns) {
+    provider.handleNotification({
+      method: 'turn/completed',
+      params: { threadId, turn: createTurn({ id: turnId }) }
+    });
+  }
+  assert.deepEqual(view.badge, {
+    value: 2,
+    tooltip: '2 completed conversations to review'
+  });
+
+  const latestList = [...view.webview.postedMessages].reverse().find((message) => (
+    (message as { type?: unknown }).type === 'threads/listState'
+  )) as {
+    snapshot?: { active?: { threads?: Array<{ id: string; hasUnreadCompletion: boolean }> } };
+  } | undefined;
+  assert.deepEqual(
+    latestList?.snapshot?.active?.threads?.map((thread) => [
+      thread.id,
+      thread.hasUnreadCompletion
+    ]),
+    [['thread-1', true], ['thread-2', true]]
+  );
+
+  view.setVisible(true);
+  view.webview.fire({ type: 'threads/viewFocus', focused: true });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const loaded = [...view.webview.postedMessages].reverse().find((message) => (
+    (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  )) as { state: { sessionId: string } } | undefined;
+  assert.ok(loaded);
+  view.webview.fire({
+    type: 'threads/conversation/seen',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-1'
+  });
+  assert.equal(view.badge?.value, 1);
+
+  view.webview.fire({ type: 'threads/back' });
+  const reviewedList = [...view.webview.postedMessages].reverse().find((message) => (
+    (message as { type?: unknown }).type === 'threads/listState'
+  )) as {
+    snapshot?: { active?: { threads?: Array<{ id: string; hasUnreadCompletion: boolean }> } };
+  } | undefined;
+  assert.deepEqual(
+    reviewedList?.snapshot?.active?.threads?.map((thread) => [
+      thread.id,
+      thread.hasUnreadCompletion
+    ]),
+    [['thread-1', false], ['thread-2', true]]
+  );
+
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-2' });
+  await flushPromises();
+  view.webview.fire({ type: 'threads/reload' });
+  assert.equal(view.badge, undefined);
 });
 
 test('automatically posts authoritative items when a completed turn notification omits details', async (t) => {

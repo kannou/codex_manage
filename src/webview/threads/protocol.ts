@@ -33,6 +33,7 @@ export interface ThreadListItemViewModel {
   readonly statusLabel: string;
   readonly pinned: boolean;
   readonly archived: boolean;
+  readonly hasUnreadCompletion: boolean;
 }
 
 export interface ThreadListPageViewModel {
@@ -124,6 +125,7 @@ export type ConversationOperationResult =
 
 export type ThreadsWebviewToHostMessage =
   | { readonly type: 'threads/ready' }
+  | { readonly type: 'threads/viewFocus'; readonly focused: boolean }
   | { readonly type: 'threads/new' }
   | { readonly type: 'threads/open'; readonly threadId: string }
   | { readonly type: 'threads/back' }
@@ -183,6 +185,12 @@ export type ThreadsWebviewToHostMessage =
   }
   | {
     readonly type: 'threads/conversation/bookmark/toggle';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly turnId: string;
+  }
+  | {
+    readonly type: 'threads/conversation/seen';
     readonly sessionId: string;
     readonly threadId: string;
     readonly turnId: string;
@@ -310,6 +318,9 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
   if (value.type === 'threads/ready' || value.type === 'threads/back' || value.type === 'threads/reload') {
     return true;
   }
+  if (value.type === 'threads/viewFocus') {
+    return hasOnlyKeys(value, ['type', 'focused']) && typeof value.focused === 'boolean';
+  }
   if (value.type === 'threads/open') {
     return isBoundedId(value.threadId);
   }
@@ -399,6 +410,14 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
     );
   }
   if (value.type === 'threads/conversation/bookmark/toggle') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      isBoundedId(value.turnId)
+    );
+  }
+  if (value.type === 'threads/conversation/seen') {
     return (
       hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId']) &&
       isBoundedId(value.sessionId) &&

@@ -28,6 +28,12 @@ import {
   runtimeSettingsSummary,
   standardSpeedLabel
 } from './runtimeSettings';
+import {
+  createConversationLatestState,
+  markConversationLatestSeen,
+  updateConversationLatest,
+  type ConversationLatestState
+} from './conversationLatest';
 
 interface VsCodeApi<T> {
   postMessage(message: unknown): void;
@@ -86,6 +92,7 @@ let conversationBookmarksTarget: HTMLSelectElement | undefined;
 let conversationTitleButton: HTMLButtonElement | undefined;
 let conversationTitleInput: HTMLInputElement | undefined;
 let conversationTitleStatus: HTMLElement | undefined;
+let conversationLatestButton: HTMLButtonElement | undefined;
 let conversationThreadId: string | undefined;
 let conversationSessionId: string | undefined;
 let conversationScreenState: ConversationScreenState | undefined;
@@ -94,6 +101,8 @@ let pendingConversationFrame: number | undefined;
 let lastConversationRevision = -1;
 let hasRenderedConversation = false;
 let lastAnnouncedCompletedTurnId: string | undefined;
+let lastReportedSeenTurnId: string | undefined;
+let conversationLatestState: ConversationLatestState = createConversationLatestState();
 let pendingConversationSend: PendingConversationSend | undefined;
 let pendingConversationStopRequestId: string | undefined;
 let pendingThreadCardFocus: ThreadCardFocus | undefined;
@@ -110,8 +119,21 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
 window.addEventListener('scroll', () => {
   if (screen === 'list') {
     persistState({ listScrollTop: window.scrollY });
+  } else if (isNearConversationBottom()) {
+    markLatestConversationActivitySeen();
   }
 }, { passive: true });
+
+window.addEventListener('focus', () => {
+  vscode.postMessage({ type: 'threads/viewFocus', focused: true });
+  if (isNearConversationBottom()) {
+    markLatestConversationActivitySeen();
+  }
+});
+
+window.addEventListener('blur', () => {
+  vscode.postMessage({ type: 'threads/viewFocus', focused: false });
+});
 
 app.addEventListener('click', (event) => {
   const element = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
@@ -180,6 +202,10 @@ app.addEventListener('click', (event) => {
     openChangedFile(element);
     return;
   }
+  if (action === 'latest') {
+    moveToLatestConversationActivity();
+    return;
+  }
   if (action?.startsWith('interaction-')) {
     submitInteraction(element, action.slice('interaction-'.length));
     return;
@@ -189,6 +215,7 @@ app.addEventListener('click', (event) => {
     return;
   }
   if (action === 'reload') {
+    markLatestConversationActivitySeen();
     vscode.postMessage({ type: 'threads/reload' });
     return;
   }
@@ -293,6 +320,7 @@ app.addEventListener('change', (event) => {
   submitRuntimeSettings(event.target === target.model);
 });
 
+vscode.postMessage({ type: 'threads/viewFocus', focused: document.hasFocus() });
 vscode.postMessage({ type: 'threads/ready' });
 
 function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
@@ -516,14 +544,29 @@ function renderThreadCard(thread: ThreadListItemViewModel): HTMLElement {
   const open = actionButton('', 'open', thread.id);
   open.className = 'thread-open';
   open.dataset.threadTitle = thread.title;
-  open.setAttribute('aria-label', `Open conversation: ${thread.title}, ${thread.description}`);
+  open.setAttribute(
+    'aria-label',
+    `Open conversation: ${thread.title}, ${thread.description}${
+      thread.hasUnreadCompletion ? ', new completed response' : ''
+    }`
+  );
+  const titleRow = document.createElement('span');
+  titleRow.className = 'thread-title-row';
   const title = document.createElement('span');
   title.className = 'thread-title';
   title.textContent = thread.title;
+  titleRow.append(title);
+  if (thread.hasUnreadCompletion) {
+    const unread = document.createElement('span');
+    unread.className = 'thread-unread-completion';
+    unread.textContent = 'New';
+    unread.setAttribute('aria-hidden', 'true');
+    titleRow.append(unread);
+  }
   const meta = document.createElement('span');
   meta.className = 'thread-meta';
   meta.textContent = thread.description;
-  open.append(title, meta);
+  open.append(titleRow, meta);
 
   const actions = document.createElement('div');
   actions.className = 'thread-actions';
@@ -654,6 +697,10 @@ function showConversationShell(
   composer.className = 'conversation-composer';
   composer.setAttribute('role', 'group');
   composer.setAttribute('aria-label', 'Message Codex');
+  const latest = actionButton('↓ Latest', 'latest');
+  latest.className = 'conversation-latest';
+  latest.setAttribute('aria-label', 'Move to latest conversation activity');
+  latest.hidden = true;
   const tools = document.createElement('div');
   tools.className = 'conversation-composer-tools';
   const add = actionButton('＋ Add', 'add');
@@ -750,7 +797,7 @@ function showConversationShell(
   info.append(status);
   controls.append(stop, send);
   footer.append(info, controls);
-  composer.append(tools, attachments, inputLabel, input, error, footer);
+  composer.append(latest, tools, attachments, inputLabel, input, error, footer);
 
   section.append(header, notice, content, interactions, announcer, composer);
   app.append(section);
@@ -758,6 +805,7 @@ function showConversationShell(
   conversationTitleButton = titleElement;
   conversationTitleInput = titleInput;
   conversationTitleStatus = titleStatus;
+  conversationLatestButton = latest;
   conversationComposerTarget = {
     container: composer, input, send, stop, status, error, announcer,
     add, addMenu, attachments, settings, settingsSummary, settingsCurrent,
@@ -794,6 +842,9 @@ function beginConversationSession(sessionId: string): void {
   pendingConversationState = undefined;
   lastConversationRevision = -1;
   lastAnnouncedCompletedTurnId = undefined;
+  lastReportedSeenTurnId = undefined;
+  conversationLatestState = createConversationLatestState();
+  if (conversationLatestButton) conversationLatestButton.hidden = true;
   pendingConversationSend = undefined;
   pendingConversationStopRequestId = undefined;
   clearConversationOperationError();
@@ -811,6 +862,7 @@ function resetConversationContext(): void {
   conversationTitleButton = undefined;
   conversationTitleInput = undefined;
   conversationTitleStatus = undefined;
+  conversationLatestButton = undefined;
   conversationThreadId = undefined;
   conversationSessionId = undefined;
   conversationScreenState = undefined;
@@ -819,6 +871,8 @@ function resetConversationContext(): void {
   lastConversationRevision = -1;
   hasRenderedConversation = false;
   lastAnnouncedCompletedTurnId = undefined;
+  lastReportedSeenTurnId = undefined;
+  conversationLatestState = createConversationLatestState();
   pendingConversationSend = undefined;
   pendingConversationStopRequestId = undefined;
 }
@@ -906,7 +960,13 @@ function renderPendingConversationState(): void {
   }
 
   const initialRender = !hasRenderedConversation;
-  const followLatest = initialRender || isNearConversationBottom();
+  const latest = updateConversationLatest(
+    conversationLatestState,
+    state.model,
+    initialRender,
+    isNearConversationBottom()
+  );
+  conversationLatestState = latest.state;
   const target = requireConversationTarget();
   renderConversation(target, state.model, {
     bookmarkedTurnIds: state.bookmarkedTurnIds,
@@ -927,8 +987,10 @@ function renderPendingConversationState(): void {
   reload?.setAttribute('aria-label', `Reload conversation: ${state.model.title}`);
   if (reload) reload.title = `Reload conversation: ${state.model.title}`;
   hasRenderedConversation = true;
-  if (followLatest) {
+  updateConversationLatestButton();
+  if (latest.followLatest) {
     window.scrollTo({ top: document.documentElement.scrollHeight });
+    markLatestConversationActivitySeen();
   }
   if (initialRender) {
     requestAnimationFrame(() => {
@@ -1046,6 +1108,60 @@ function jumpToTurn(turnId: string | undefined): void {
   if (conversationComposerTarget) {
     conversationComposerTarget.announcer.textContent = `Moved to ${heading}.`;
   }
+}
+
+function moveToLatestConversationActivity(): void {
+  window.scrollTo({ top: document.documentElement.scrollHeight });
+  markLatestConversationActivitySeen();
+  requestAnimationFrame(() => {
+    app.querySelector<HTMLElement>('.turn:last-of-type')?.focus({ preventScroll: true });
+    if (conversationComposerTarget) {
+      conversationComposerTarget.announcer.textContent = 'Moved to latest conversation activity.';
+    }
+  });
+}
+
+function markLatestConversationActivitySeen(): void {
+  conversationLatestState = markConversationLatestSeen(conversationLatestState);
+  updateConversationLatestButton();
+  reportCompletedTurnSeen();
+}
+
+function updateConversationLatestButton(): void {
+  const button = conversationLatestButton;
+  if (!button) return;
+  const show = conversationLatestState.hasUnseenActivity;
+  const wasHidden = button.hidden;
+  button.hidden = !show;
+  if (show && wasHidden && conversationComposerTarget) {
+    conversationComposerTarget.announcer.textContent =
+      'New conversation activity is available. Use Latest to move to it.';
+  }
+}
+
+function reportCompletedTurnSeen(): void {
+  const state = conversationScreenState;
+  if (
+    !state ||
+    !conversationSessionId ||
+    !conversationThreadId ||
+    !document.hasFocus()
+  ) {
+    return;
+  }
+  const completed = [...state.model.turns]
+    .reverse()
+    .find((turn) => turn.status !== 'In progress');
+  if (!completed || completed.id === lastReportedSeenTurnId) {
+    return;
+  }
+  lastReportedSeenTurnId = completed.id;
+  vscode.postMessage({
+    type: 'threads/conversation/seen',
+    sessionId: conversationSessionId,
+    threadId: conversationThreadId,
+    turnId: completed.id
+  });
 }
 
 function submitConversation(): void {
@@ -1930,7 +2046,7 @@ function actionButton(
   label: string,
   action: ThreadListAction | 'new' | 'open' | 'back' | 'reload' | 'send' | 'stop' | 'add' |
     'add-image' | 'add-mention' | 'add-skill' | 'remove-attachment' |
-    'bookmark-toggle' |
+    'bookmark-toggle' | 'latest' |
     'interaction-accept' | 'interaction-session' | 'interaction-decline' | 'interaction-cancel',
   threadId?: string
 ): HTMLButtonElement {

@@ -192,6 +192,23 @@ button.new-conversation:disabled {
   white-space: nowrap;
 }
 
+.thread-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.thread-unread-completion {
+  flex: none;
+  padding: 1px 5px;
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
 .thread-meta {
   display: block;
   width: 100%;
@@ -534,6 +551,24 @@ button.turn-bookmark-toggle:hover {
   padding: 10px 0 4px;
   background: var(--vscode-sideBar-background);
   border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-widget-border));
+}
+
+button.conversation-latest {
+  position: absolute;
+  top: -36px;
+  right: 0;
+  z-index: 3;
+  padding: 4px 9px;
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  border-color: var(--vscode-widget-border);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+}
+
+button.conversation-latest:hover {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
 }
 
 .conversation-composer-tools {

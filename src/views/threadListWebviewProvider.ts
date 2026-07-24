@@ -200,7 +200,10 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private conversationViewRevision = 0;
   private conversationAttachments: ConversationAttachment[] = [];
   private readonly pendingBookmarkUpdates = new Set<string>();
+  private readonly latestCompletedTurnByThread = new Map<string, string>();
+  private readonly unreadCompletedTurnByThread = new Map<string, string>();
   private conversationScreenOpen = false;
+  private webviewFocused = false;
   private disposed = false;
 
   public constructor(private readonly options: ThreadListWebviewProviderOptions) {}
@@ -215,8 +218,10 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.activeThread = undefined;
     this.setConversationScreenOpen(false);
     this.viewReady = false;
+    this.webviewFocused = false;
     this.disposed = false;
     this.view = view;
+    this.updateUnreadCompletionPresentation();
     view.webview.options = {
       enableScripts: true,
       enableForms: false,
@@ -245,6 +250,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
               this.showList();
             }
             return;
+          case 'threads/viewFocus':
+            this.webviewFocused = message.focused && view.visible;
+            return;
           case 'threads/open':
             this.openConversation(message.threadId);
             return;
@@ -255,6 +263,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
             this.showList();
             return;
           case 'threads/reload':
+            if (this.activeThread) {
+              this.markCompletedTurnSeen(this.activeThread.id);
+            }
             if (this.newConversationDraft) {
               this.loadNewConversationRuntime(this.newConversationDraft);
             } else if (this.activeThread) {
@@ -311,6 +322,13 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
           case 'threads/conversation/bookmark/toggle':
             this.toggleTurnBookmark(message.sessionId, message.threadId, message.turnId);
             return;
+          case 'threads/conversation/seen':
+            this.confirmCompletedTurnSeen(
+              message.sessionId,
+              message.threadId,
+              message.turnId
+            );
+            return;
           case 'threads/conversation/copy':
             void this.copyConversationContent(message);
             return;
@@ -319,6 +337,11 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
             return;
           case 'threads/action':
             this.executeAction(message.action, message.threadId);
+        }
+      }),
+      view.onDidChangeVisibility(() => {
+        if (!view.visible) {
+          this.webviewFocused = false;
         }
       }),
       view.onDidDispose(() => {
@@ -331,6 +354,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         this.setConversationScreenOpen(false);
         this.pendingRestoreThreadId = undefined;
         this.viewReady = false;
+        this.webviewFocused = false;
         this.view = undefined;
         this.disposeViewListeners();
       })
@@ -486,6 +510,14 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   }
 
   public handleNotification(notification: AppServerNotification): void {
+    if (
+      notification.method === 'thread/deleted' &&
+      isJsonObject(notification.params) &&
+      typeof notification.params.threadId === 'string'
+    ) {
+      this.latestCompletedTurnByThread.delete(notification.params.threadId);
+      this.markCompletedTurnSeen(notification.params.threadId);
+    }
     if (notification.method === 'serverRequest/resolved' && isJsonObject(notification.params)) {
       const resolvedId = notification.params.requestId;
       for (const [id, interaction] of this.interactions) {
@@ -505,6 +537,12 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       const parsed = parseConversationNotification(notification.method, notification.params);
       if (!parsed) {
         return;
+      }
+      if (
+        parsed.method === 'turn/completed' &&
+        parsed.params.turn.status !== 'inProgress'
+      ) {
+        this.recordCompletedTurn(parsed.params.threadId, parsed.params.turn.id);
       }
       const session = this.conversationSessions.get(parsed.params.threadId);
       if (session) {
@@ -603,6 +641,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.pendingRestoreThreadId = undefined;
     this.interactions.clear();
     this.pendingNewConversations.clear();
+    this.latestCompletedTurnByThread.clear();
+    this.unreadCompletedTurnByThread.clear();
+    this.updateUnreadCompletionPresentation();
     this.snapshot = {
       pinned: { threads: [], nextCursor: null, loaded: true },
       active: { threads: [], nextCursor: null, loaded: false },
@@ -622,6 +663,8 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.pendingRestoreThreadId = undefined;
     this.interactions.clear();
     this.pendingNewConversations.clear();
+    this.latestCompletedTurnByThread.clear();
+    this.unreadCompletedTurnByThread.clear();
     this.viewReady = false;
     this.view = undefined;
     this.disposeViewListeners();
@@ -1731,10 +1774,73 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     return undefined;
   }
 
+  private recordCompletedTurn(threadId: string, turnId: string): void {
+    if (this.latestCompletedTurnByThread.get(threadId) === turnId) {
+      return;
+    }
+    this.latestCompletedTurnByThread.set(threadId, turnId);
+    if (
+      this.activeThread?.id === threadId &&
+      this.conversationScreenOpen &&
+      this.view?.visible === true &&
+      this.webviewFocused
+    ) {
+      this.unreadCompletedTurnByThread.delete(threadId);
+    } else {
+      this.unreadCompletedTurnByThread.set(threadId, turnId);
+    }
+    this.updateUnreadCompletionPresentation();
+  }
+
+  private confirmCompletedTurnSeen(
+    sessionId: string,
+    threadId: string,
+    turnId: string
+  ): void {
+    if (
+      !this.webviewFocused ||
+      this.view?.visible !== true ||
+      !this.isCurrentSession(sessionId, threadId) ||
+      this.unreadCompletedTurnByThread.get(threadId) !== turnId
+    ) {
+      return;
+    }
+    const turn = this.conversationSession?.snapshot().model.turns.find(
+      (candidate) => candidate.id === turnId && candidate.status !== 'In progress'
+    );
+    if (turn) {
+      this.markCompletedTurnSeen(threadId);
+    }
+  }
+
+  private markCompletedTurnSeen(threadId: string): void {
+    if (!this.unreadCompletedTurnByThread.delete(threadId)) {
+      return;
+    }
+    this.updateUnreadCompletionPresentation();
+  }
+
+  private updateUnreadCompletionPresentation(): void {
+    const count = this.unreadCompletedTurnByThread.size;
+    if (this.view) {
+      this.view.badge = count === 0
+        ? undefined
+        : {
+          value: count,
+          tooltip: count === 1
+            ? '1 completed conversation to review'
+            : `${count} completed conversations to review`
+        };
+    }
+    if (this.viewReady && !this.activeThread && !this.newConversationDraft) {
+      this.postListState();
+    }
+  }
+
   private postListState(): void {
     this.post({
       type: 'threads/listState',
-      snapshot: toListSnapshot(this.snapshot),
+      snapshot: toListSnapshot(this.snapshot, this.unreadCompletedTurnByThread),
       status: this.status,
       hasWorkspace: Boolean(vscode.workspace.workspaceFolders?.length)
     });
@@ -1826,15 +1932,21 @@ function webviewRoot(extensionUri: vscode.Uri): vscode.Uri {
   return vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
 }
 
-function toListSnapshot(snapshot: ThreadRepositorySnapshot): ThreadListSnapshotViewModel {
+function toListSnapshot(
+  snapshot: ThreadRepositorySnapshot,
+  unreadCompletedTurnByThread: ReadonlyMap<string, string>
+): ThreadListSnapshotViewModel {
   return {
-    pinned: toListPage(snapshot.pinned),
-    active: toListPage(snapshot.active),
-    archive: toListPage(snapshot.archive)
+    pinned: toListPage(snapshot.pinned, unreadCompletedTurnByThread),
+    active: toListPage(snapshot.active, unreadCompletedTurnByThread),
+    archive: toListPage(snapshot.archive, unreadCompletedTurnByThread)
   };
 }
 
-function toListPage(page: ThreadPageState): ThreadListPageViewModel {
+function toListPage(
+  page: ThreadPageState,
+  unreadCompletedTurnByThread: ReadonlyMap<string, string>
+): ThreadListPageViewModel {
   return {
     threads: page.threads.map((thread) => ({
       id: thread.id,
@@ -1842,7 +1954,8 @@ function toListPage(page: ThreadPageState): ThreadListPageViewModel {
       description: thread.description,
       statusLabel: thread.statusLabel,
       pinned: thread.pinned,
-      archived: thread.archived
+      archived: thread.archived,
+      hasUnreadCompletion: unreadCompletedTurnByThread.has(thread.id)
     })),
     nextCursor: page.nextCursor,
     loaded: page.loaded
