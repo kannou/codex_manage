@@ -258,6 +258,23 @@ export class ConversationSession {
   }
 
   public updateRuntimeSettings(update: ConversationRuntimeSettingsUpdate): boolean {
+    const currentModel = this.runtime.model
+      ? findRuntimeModel(this.modelCatalog, this.runtime.model)
+      : undefined;
+    const selectedModel = findRuntimeModel(this.modelCatalog, update.model);
+    const modelChanged = Boolean(
+      selectedModel && (!currentModel || selectedModel.id !== currentModel.id)
+    );
+    const resolvedUpdate = modelChanged
+      ? {
+        ...update,
+        effort: this.runtime.effort && selectedModel?.supportedReasoningEfforts.some(
+          (option) => option.reasoningEffort === this.runtime.effort
+        )
+          ? this.runtime.effort
+          : null
+      }
+      : update;
     if (
       this.disposed ||
       this.runtime.status !== 'ready' ||
@@ -265,25 +282,25 @@ export class ConversationSession {
         this.modelCatalog,
         this.runtime.approvalPolicy,
         this.runtime.approvalsReviewer,
-        update
+        resolvedUpdate
       )
     ) {
       return false;
     }
-    if (update.approvalPolicy !== 'custom') {
-      this.approvalPolicy = update.approvalPolicy;
+    if (resolvedUpdate.approvalPolicy !== 'custom') {
+      this.approvalPolicy = resolvedUpdate.approvalPolicy;
     }
-    if (update.approvalsReviewer !== 'custom') {
-      this.approvalsReviewer = update.approvalsReviewer;
+    if (resolvedUpdate.approvalsReviewer !== 'custom') {
+      this.approvalsReviewer = resolvedUpdate.approvalsReviewer;
     }
     this.runtime = createConversationRuntimeSettings(
       this.modelCatalog,
-      update.model,
-      update.effort,
-      update.serviceTier,
-      update.sandbox,
-      update.approvalPolicy,
-      update.approvalsReviewer
+      resolvedUpdate.model,
+      resolvedUpdate.effort,
+      resolvedUpdate.serviceTier,
+      resolvedUpdate.sandbox,
+      resolvedUpdate.approvalPolicy,
+      resolvedUpdate.approvalsReviewer
     );
     this.publish();
     return true;
