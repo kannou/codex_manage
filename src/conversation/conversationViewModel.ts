@@ -106,21 +106,9 @@ function toTurnViewModel(
 }
 
 function selectLiveItemIds(items: readonly ConversationItemViewModel[]): readonly string[] {
-  const commandItems = items.filter((item): item is Extract<
-    ConversationItemViewModel,
-    { kind: 'activity' }
-  > => (
-    item.kind === 'activity' && item.activityKind === 'command'
-  ));
-  const activeCommands = commandItems.filter((item) => item.status === 'In Progress');
-  const latestCompletedCommand = activeCommands.length === 0
-    ? [...commandItems].reverse().find((item) => item.status === 'Completed')
-    : undefined;
-
   return items.filter((item) => {
     if (item.kind !== 'activity' || item.activityKind !== 'command') return true;
-    if (item.status !== 'Completed') return true;
-    return item.id === latestCompletedCommand?.id;
+    return item.status !== 'Completed';
   }).map((item) => item.id);
 }
 
