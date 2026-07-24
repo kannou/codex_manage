@@ -195,7 +195,11 @@ function updateTurnError(
 }
 
 function reconcileItems(items: HTMLElement, turn: ConversationTurnViewModel): void {
-  if (turn.items.length === 0) {
+  const liveItemIds = turn.liveItemIds ? new Set(turn.liveItemIds) : null;
+  const visibleItems = liveItemIds
+    ? turn.items.filter((item) => liveItemIds.has(item.id))
+    : turn.items;
+  if (visibleItems.length === 0) {
     const message = turn.itemsView === 'full'
       ? 'No stored items for this turn.'
       : 'Detailed items were not stored for this turn.';
@@ -242,7 +246,7 @@ function reconcileItems(items: HTMLElement, turn: ConversationTurnViewModel): vo
   let topLevelIndex = 0;
   let workItemIndex = 0;
   let placedWorkDetails = false;
-  for (const item of turn.items) {
+  for (const item of visibleItems) {
     let element = existing.get(item.id);
     if (!element || !isCompatibleItemElement(element, item)) {
       element = createItem(item);
@@ -424,7 +428,9 @@ function updateItem(element: HTMLElement, item: ConversationItemViewModel, turn:
     element,
     item.detailPresentation === 'inline'
       ? 'activity-card activity-card-inline'
-      : 'activity-card'
+      : item.activityKind === 'command'
+        ? 'activity-card activity-command'
+        : 'activity-card'
   );
   const previousPresentation = element.dataset.detailPresentation;
   element.dataset.detailPresentation = item.detailPresentation;

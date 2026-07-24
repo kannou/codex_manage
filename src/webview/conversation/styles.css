@@ -243,6 +243,14 @@ details .activity-summary {
   overflow-wrap: anywhere;
 }
 
+.activity-command:not([open]) .activity-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
 .activity-detail {
   max-height: 320px;
   overflow: auto;

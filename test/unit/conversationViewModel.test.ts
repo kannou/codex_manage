@@ -120,6 +120,7 @@ test('maps stored history in order while excluding sensitive work payloads', () 
   assert.equal(model.turns[0]?.errorMessage, 'Fixture failure');
   assert.deepEqual(model.turns[0]?.workDetails, { count: 5, status: 'Failed' });
   assert.deepEqual(model.turns[0]?.changedFiles, []);
+  assert.equal(model.turns[0]?.liveItemIds, null);
 
   const userMessage = model.turns[0]?.items[0];
   assert.equal(userMessage?.kind, 'message');
@@ -228,12 +229,66 @@ test('keeps live work items separate and groups the same items after completion 
   const reloaded = toConversationViewModel(completedThread);
 
   assert.equal(running.turns[0]?.workDetails, null);
+  assert.deepEqual(running.turns[0]?.liveItemIds, turnItems.map((item) => item.id));
   assert.deepEqual(completed.turns[0]?.workDetails, { count: 2, status: null });
   assert.deepEqual(reloaded.turns[0]?.workDetails, completed.turns[0]?.workDetails);
   assert.deepEqual(
     completed.turns[0]?.items.map((item) => item.id),
     turnItems.map((item) => item.id)
   );
+});
+
+test('keeps only the latest successful sequential command in the running view', () => {
+  const command = items[3] as Extract<ThreadItem, { type: 'commandExecution' }>;
+  const commands: ThreadItem[] = [
+    { ...command, id: 'command-first', command: 'printf first' },
+    { ...command, id: 'command-failed', command: 'printf failed', status: 'failed', exitCode: 1 },
+    { ...command, id: 'command-latest', command: 'printf 日本語の長い引数' }
+  ];
+  const running = toConversationViewModel(createThread({
+    turns: [createTurn({
+      status: 'inProgress',
+      completedAt: null,
+      durationMs: null,
+      items: [items[0]!, ...commands]
+    })]
+  }));
+
+  assert.deepEqual(running.turns[0]?.liveItemIds, [
+    'user-1',
+    'command-failed',
+    'command-latest'
+  ]);
+  assert.deepEqual(running.turns[0]?.items.map((item) => item.id), [
+    'user-1',
+    'command-first',
+    'command-failed',
+    'command-latest'
+  ]);
+});
+
+test('shows parallel running commands while retaining all command history', () => {
+  const command = items[3] as Extract<ThreadItem, { type: 'commandExecution' }>;
+  const running = toConversationViewModel(createThread({
+    turns: [createTurn({
+      status: 'inProgress',
+      completedAt: null,
+      durationMs: null,
+      items: [
+        { ...command, id: 'command-completed' },
+        { ...command, id: 'command-running-a', status: 'inProgress', exitCode: null },
+        { ...command, id: 'command-running-b', status: 'inProgress', exitCode: null },
+        { ...command, id: 'command-declined', status: 'declined', exitCode: null }
+      ]
+    })]
+  }));
+
+  assert.deepEqual(running.turns[0]?.liveItemIds, [
+    'command-running-a',
+    'command-running-b',
+    'command-declined'
+  ]);
+  assert.equal(running.turns[0]?.items.length, 4);
 });
 
 test('reports interrupted and declined work in the collapsed heading', () => {
