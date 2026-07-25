@@ -49,6 +49,7 @@ export interface ThreadListSnapshotViewModel {
 }
 
 export type ThreadListGroupId = 'pinned' | 'active' | 'archive';
+export type ReduceMotionPreference = 'auto' | 'on' | 'off';
 
 export interface ThreadListExpandedGroups {
   readonly pinned: boolean;
@@ -240,6 +241,7 @@ export type ThreadsHostToWebviewMessage =
     readonly hasWorkspace: boolean;
   }
   | { readonly type: 'threads/showList' }
+  | { readonly type: 'threads/reduceMotion'; readonly preference: ReduceMotionPreference }
   | { readonly type: 'threads/conversationUsage'; readonly status: 'loading' | 'ready' | 'unavailable'; readonly usage?: UsageSnapshot }
   | {
     readonly type: 'threads/focusConversationPrompt';
@@ -472,6 +474,8 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
   switch (value.type) {
     case 'threads/showList':
       return true;
+    case 'threads/reduceMotion':
+      return value.preference === 'auto' || value.preference === 'on' || value.preference === 'off';
     case 'threads/conversationUsage':
       return (value.status === 'loading' || value.status === 'unavailable' ||
         (value.status === 'ready' && isUsageSnapshot(value.usage)));

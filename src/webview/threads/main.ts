@@ -12,7 +12,6 @@ import {
   MAX_COMPOSER_TEXT_LENGTH,
   isThreadsHostMessage,
   restoreThreadsWebviewState,
-  type ConversationExecutionViewModel,
   type ConversationOperationResult,
   type ConversationScreenState,
   type ThreadListAction,
@@ -34,6 +33,7 @@ import {
   updateConversationLatest,
   type ConversationLatestState
 } from './conversationLatest';
+import { conversationActivityPresentation } from './conversationActivity';
 
 interface VsCodeApi<T> {
   postMessage(message: unknown): void;
@@ -55,6 +55,7 @@ interface ConversationComposerTarget {
   readonly input: HTMLTextAreaElement;
   readonly send: HTMLButtonElement;
   readonly stop: HTMLButtonElement;
+  readonly activityIndicator: HTMLElement;
   readonly status: HTMLElement;
   readonly error: HTMLElement;
   readonly announcer: HTMLElement;
@@ -351,6 +352,9 @@ function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
       if (listState) {
         renderList(listState);
       }
+      return;
+    case 'threads/reduceMotion':
+      document.body.dataset.reduceMotion = message.preference;
       return;
     case 'threads/focusConversationPrompt':
       focusConversationPrompt(message.sessionId, message.threadId);
@@ -813,6 +817,15 @@ function showConversationShell(
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   status.setAttribute('aria-atomic', 'true');
+  const activityIndicator = document.createElement('span');
+  activityIndicator.className = 'conversation-activity-indicator';
+  activityIndicator.setAttribute('aria-hidden', 'true');
+  activityIndicator.hidden = true;
+  activityIndicator.append(
+    document.createElement('span'),
+    document.createElement('span'),
+    document.createElement('span')
+  );
   const controls = document.createElement('div');
   controls.className = 'conversation-composer-controls';
   const stop = actionButton('Stop', 'stop');
@@ -822,7 +835,7 @@ function showConversationShell(
   const send = actionButton('Send', 'send');
   send.className = 'conversation-send';
   send.title = 'Send (Ctrl/Cmd+Enter)';
-  info.append(usageButton, status);
+  info.append(usageButton, activityIndicator, status);
   controls.append(stop, send);
   footer.append(info, controls);
   composer.append(latest, tools, attachments, inputLabel, input, error, usagePanel, footer);
@@ -835,7 +848,8 @@ function showConversationShell(
   conversationTitleStatus = titleStatus;
   conversationLatestButton = latest;
   conversationComposerTarget = {
-    container: composer, input, send, stop, status, error, announcer, usageButton, usagePanel,
+    container: composer, input, send, stop, activityIndicator, status, error, announcer,
+    usageButton, usagePanel,
     add, addMenu, attachments, settings, settingsSummary, settingsCurrent,
     model: model.select,
     effort: effort.select,
@@ -1402,9 +1416,16 @@ function updateConversationComposer(): void {
     String(Boolean(pendingConversationSend || pendingConversationStopRequestId))
   );
 
-  const status = waitingForInput ? 'Respond to the request above to continue.' : conversationStatus(execution);
-  if (target.status.textContent !== status) {
-    target.status.textContent = status;
+  const activity = conversationActivityPresentation(
+    execution,
+    waitingForInput,
+    Boolean(pendingConversationSend),
+    Boolean(pendingConversationStopRequestId)
+  );
+  target.activityIndicator.hidden = !activity.activityVisible;
+  target.status.classList.toggle('sr-only', activity.activityVisible);
+  if (target.status.textContent !== activity.statusText) {
+    target.status.textContent = activity.statusText;
   }
   if (moveFocusFromStop) {
     requestAnimationFrame(() => focusAfterConversationStop(target));
@@ -1949,31 +1970,6 @@ function focusConversationPrompt(sessionId: string, threadId: string): void {
     return;
   }
   target.input.focus({ preventScroll: true });
-}
-
-function conversationStatus(execution: ConversationExecutionViewModel | undefined): string {
-  if (pendingConversationStopRequestId) {
-    return 'Stopping the active turn…';
-  }
-  if (pendingConversationSend) {
-    return 'Sending message…';
-  }
-  switch (execution?.kind) {
-    case 'idle':
-      return '';
-    case 'resuming':
-      return 'Resuming conversation…';
-    case 'starting':
-      return 'Starting a new turn…';
-    case 'running':
-      return 'Codex is responding…';
-    case 'stopping':
-      return 'Stopping the active turn…';
-    case 'unavailable':
-      return execution.message;
-    default:
-      return 'Loading conversation…';
-  }
 }
 
 function showConversationOperationError(message: string): void {

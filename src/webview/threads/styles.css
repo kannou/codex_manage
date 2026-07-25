@@ -814,6 +814,55 @@ button.conversation-attachment-remove:focus-visible {
 
 .conversation-composer-status:empty { display: none; }
 
+.conversation-activity-indicator {
+  width: 18px;
+  height: 8px;
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.conversation-activity-indicator > span {
+  width: 4px;
+  height: 4px;
+  flex: none;
+  background-color: var(--vscode-foreground);
+  border-radius: 50%;
+  opacity: 0.28;
+  animation: conversation-activity-indicator 1.2s ease-in-out infinite;
+}
+
+.conversation-activity-indicator > span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.conversation-activity-indicator > span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes conversation-activity-indicator {
+  0%,
+  60%,
+  100% {
+    opacity: 0.28;
+  }
+
+  30% {
+    opacity: 1;
+  }
+}
+
+body[data-reduce-motion='on'] .conversation-activity-indicator > span {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-reduce-motion='auto'] .conversation-activity-indicator > span {
+    animation: none;
+  }
+}
+
 .conversation-composer-controls {
   display: flex;
   flex: none;
