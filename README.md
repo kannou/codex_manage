@@ -48,13 +48,13 @@ npm run package
 
 If the local npm cache is incomplete, retry with network access using `npm run bootstrap`.
 
-Then install `codex-thread-manager-0.0.1.vsix` using either:
+Then install `codex-thread-manager-0.1.0.vsix` using either:
 
 - VS Code: **Extensions: Install from VSIX...**
 - Command line:
 
 ```bash
-code --install-extension codex-thread-manager-0.0.1.vsix
+code --install-extension codex-thread-manager-0.1.0.vsix
 ```
 
 Reload VS Code after installation.

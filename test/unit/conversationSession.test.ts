@@ -7,6 +7,8 @@ import type { Turn } from '../../src/codex/protocol/generated/v2/Turn';
 import type { Model } from '../../src/codex/protocol/generated/v2/Model';
 import {
   ConversationSession,
+  createConversationRuntimeSettings,
+  visibleConversationModels,
   type ConversationSessionClient
 } from '../../src/conversation/conversationSession';
 import { createThread, createTurn } from '../support/threadFixture';
@@ -61,6 +63,66 @@ function liveTurn(id = 'turn-live'): Turn {
     items: []
   });
 }
+
+function runtimeModel(overrides: Partial<Model> = {}): Model {
+  return {
+    id: 'gpt-fixture-id',
+    model: 'gpt-fixture',
+    upgrade: null,
+    upgradeInfo: null,
+    availabilityNux: null,
+    displayName: 'GPT Fixture',
+    description: 'Fixture model',
+    hidden: false,
+    supportedReasoningEfforts: [],
+    defaultReasoningEffort: 'medium',
+    inputModalities: [],
+    supportsPersonality: false,
+    additionalSpeedTiers: [],
+    serviceTiers: [],
+    defaultServiceTier: null,
+    isDefault: false,
+    ...overrides
+  };
+}
+
+test('deduplicates visible models that share the same runtime model value', () => {
+  const model = runtimeModel({
+    id: 'gpt-5.6-terra-id',
+    model: 'gpt-5.6-terra',
+    displayName: 'GPT-5.6-Terra',
+    description: 'Frontier'
+  });
+
+  const visible = visibleConversationModels([
+    model,
+    { ...model, id: 'gpt-5.6-terra-alias' }
+  ]);
+
+  assert.deepEqual(visible.map((candidate) => candidate.id), ['gpt-5.6-terra-id']);
+});
+
+test('deduplicates model choices with the same visible label and keeps the current value', () => {
+  const advertised = runtimeModel({
+    id: 'gpt-5.6-terra-catalog',
+    model: 'gpt-5.6-terra-catalog',
+    displayName: 'GPT-5.6-Terra',
+    description: 'Frontier'
+  });
+
+  const runtime = createConversationRuntimeSettings(
+    [advertised],
+    'gpt-5.6-terra',
+    null,
+    null,
+    'workspace-write',
+    'on-request',
+    'user'
+  );
+
+  assert.equal(runtime.model, 'gpt-5.6-terra');
+  assert.deepEqual(runtime.models.map((candidate) => candidate.value), ['gpt-5.6-terra']);
+});
 
 function commandExecution(
   id: string,
