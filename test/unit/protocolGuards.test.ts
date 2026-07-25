@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   parseConversationNotification,
   parseConversationConfigDefaults,
+  parseFuzzyFileSearchResponse,
   parseAccountRateLimitsResponse,
   parseInitializeResponse,
   parseModelListResponse,
@@ -129,6 +130,46 @@ test('validates workspace-scoped Skill metadata before exposing choices', () => 
       data: [{ cwd: 'D:\\workspace', skills: [{ name: 'broken' }], errors: [] }]
     }, ['D:\\workspace']),
     /invalid skills\/list response/u
+  );
+});
+
+test('validates fuzzy file search results against requested roots', () => {
+  const response = parseFuzzyFileSearchResponse({
+    files: [{
+      root: '/workspace',
+      path: 'src/main.ts',
+      match_type: 'file',
+      file_name: 'main.ts',
+      score: 42,
+      indices: [4, 5]
+    }]
+  }, ['/workspace']);
+  assert.equal(response.files[0]?.path, 'src/main.ts');
+  assert.throws(
+    () => parseFuzzyFileSearchResponse({
+      files: [{
+        root: '/outside',
+        path: 'secret.txt',
+        match_type: 'file',
+        file_name: 'secret.txt',
+        score: 1,
+        indices: null
+      }]
+    }, ['/workspace']),
+    /invalid fuzzyFileSearch response/u
+  );
+  assert.throws(
+    () => parseFuzzyFileSearchResponse({
+      files: [{
+        root: '/workspace',
+        path: 'src',
+        match_type: 'unknown',
+        file_name: 'src',
+        score: Number.NaN,
+        indices: [-1]
+      }]
+    }, ['/workspace']),
+    /invalid fuzzyFileSearch response/u
   );
 });
 

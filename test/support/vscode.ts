@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
 
 export class MarkdownString {
   public value: string;
@@ -64,6 +65,13 @@ export class Uri {
   }
 }
 
+export enum FileType {
+  Unknown = 0,
+  File = 1,
+  Directory = 2,
+  SymbolicLink = 64
+}
+
 type Listener<T> = (event: T) => unknown;
 
 export class EventEmitter<T> {
@@ -86,8 +94,20 @@ export class EventEmitter<T> {
 
 export const workspace: {
   workspaceFolders: Array<{ uri: { fsPath: string } }> | undefined;
+  fs: {
+    stat(uri: Uri): Promise<{ type: FileType; size: number }>;
+  };
 } = {
-  workspaceFolders: []
+  workspaceFolders: [],
+  fs: {
+    stat: async (uri) => {
+      const value = await stat(uri.fsPath);
+      return {
+        type: value.isFile() ? FileType.File : value.isDirectory() ? FileType.Directory : FileType.Unknown,
+        size: value.size
+      };
+    }
+  }
 };
 
 export const window: {

@@ -201,6 +201,36 @@ test('accepts bounded composer actions and rejects arbitrary conversation payloa
     attachmentId: 'attachment-1'
   }), true);
   assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/suggestion/search',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    kind: 'file',
+    query: 'main'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/suggestion/select',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    suggestionId: 'candidate-1'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/suggestion/clear',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/suggestion/search',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    kind: 'file',
+    query: 'src main',
+    path: '/private/main.ts'
+  }), false);
+  assert.equal(isThreadsWebviewMessage({
     type: 'threads/conversation/attachment/addImage',
     sessionId: 'session-1',
     threadId: 'thread-1',
@@ -310,6 +340,63 @@ test('accepts bounded composer actions and rejects arbitrary conversation payloa
     text: 'Hello',
     method: 'turn/start'
   }), false);
+});
+
+test('accepts bounded suggestion results without exposing host attachment paths', () => {
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationSuggestions',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    kind: 'file',
+    query: 'main',
+    outcome: 'ready',
+    suggestions: [{
+      id: 'candidate-1',
+      kind: 'file',
+      name: 'main.ts',
+      path: 'src/main.ts'
+    }]
+  }), true);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationSuggestions',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    kind: 'skill',
+    query: 'review',
+    outcome: 'ready',
+    suggestions: [{
+      id: 'candidate-2',
+      kind: 'skill',
+      name: 'review',
+      description: 'Review changes'
+    }]
+  }), true);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationSuggestions',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    kind: 'file',
+    query: 'main',
+    outcome: 'ready',
+    suggestions: [{
+      id: 'candidate-1',
+      kind: 'file',
+      name: 'main.ts',
+      path: '/workspace/src/main.ts',
+      absolutePath: '/workspace/src/main.ts'
+    }]
+  }), false);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationSuggestionSelection',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    suggestionId: 'candidate-1',
+    outcome: 'accepted'
+  }), true);
 });
 
 test('validates persisted navigation state and host messages', () => {

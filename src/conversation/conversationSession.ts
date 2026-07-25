@@ -14,6 +14,8 @@ import type { ModelListResponse } from '../codex/protocol/generated/v2/ModelList
 import type { SkillsListParams } from '../codex/protocol/generated/v2/SkillsListParams';
 import type { SkillsListResponse } from '../codex/protocol/generated/v2/SkillsListResponse';
 import type { UserInput } from '../codex/protocol/generated/v2/UserInput';
+import type { FuzzyFileSearchParams } from '../codex/protocol/generated/FuzzyFileSearchParams';
+import type { FuzzyFileSearchResponse } from '../codex/protocol/generated/FuzzyFileSearchResponse';
 import type { AskForApproval } from '../codex/protocol/generated/v2/AskForApproval';
 import type { ApprovalsReviewer } from '../codex/protocol/generated/v2/ApprovalsReviewer';
 import type { SandboxMode } from '../codex/protocol/generated/v2/SandboxMode';
@@ -45,6 +47,7 @@ export interface ConversationSessionClient {
   interruptTurn(params: TurnInterruptParams): Promise<TurnInterruptResponse>;
   listModels(params: ModelListParams): Promise<ModelListResponse>;
   listSkills?(params: SkillsListParams): Promise<SkillsListResponse>;
+  fuzzyFileSearch?(params: FuzzyFileSearchParams): Promise<FuzzyFileSearchResponse>;
 }
 
 export type SimpleApprovalPolicy = 'untrusted' | 'on-request' | 'never';

@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { basename, extname, isAbsolute, normalize } from 'node:path';
+import { basename, extname, isAbsolute, normalize, relative, resolve, sep } from 'node:path';
 import * as vscode from 'vscode';
 import type { AppServerNotification, AppServerRequest } from '../codex/appServerClient';
 import {
@@ -40,11 +40,14 @@ import {
 } from '../conversation/conversationSession';
 import {
   isThreadsWebviewMessage,
+  MAX_CONVERSATION_SUGGESTIONS,
   restoreThreadsWebviewState,
   type ConversationExecutionViewModel,
   type ConversationAttachmentViewModel,
   type ConversationOperation,
   type ConversationScreenState,
+  type ConversationSuggestionKind,
+  type ConversationSuggestionViewModel,
   type ThreadListAction,
   type ThreadListPageViewModel,
   type ReduceMotionPreference,
@@ -138,6 +141,27 @@ interface SkillAttachment {
 
 type ConversationAttachment = LocalImageAttachment | MentionAttachment | SkillAttachment;
 
+type ConversationSuggestion = {
+  readonly id: string;
+  readonly kind: 'file';
+  readonly name: string;
+  readonly path: string;
+  readonly displayPath: string;
+} | {
+  readonly id: string;
+  readonly kind: 'skill';
+  readonly skill: PickedSkill;
+};
+
+interface ConversationSuggestionSearch {
+  readonly generation: number;
+  readonly sessionId: string;
+  readonly threadId: string;
+  readonly requestId: string;
+  readonly kind: ConversationSuggestionKind;
+  candidates: readonly ConversationSuggestion[];
+}
+
 interface ConversationDraft {
   text: string;
   attachments: ConversationAttachment[];
@@ -208,6 +232,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private conversationSubscription: { dispose(): void } | undefined;
   private pendingConversationLoad: PendingConversationLoad | undefined;
   private pendingConversationPost: PendingConversationPost | undefined;
+  private conversationSuggestionSearch: ConversationSuggestionSearch | undefined;
   private conversationPostTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingRestoreThreadId: string | undefined;
   private viewReady = false;
@@ -338,6 +363,19 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
             return;
           case 'threads/conversation/attachment/remove':
             this.removeAttachment(message.sessionId, message.threadId, message.attachmentId);
+            return;
+          case 'threads/conversation/suggestion/search':
+            this.searchConversationSuggestions(message);
+            return;
+          case 'threads/conversation/suggestion/select':
+            this.selectConversationSuggestion(message);
+            return;
+          case 'threads/conversation/suggestion/clear':
+            this.clearConversationSuggestions(
+              message.sessionId,
+              message.threadId,
+              message.requestId
+            );
             return;
           case 'threads/conversation/interaction':
             this.respondToInteraction(
@@ -1477,6 +1515,317 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.postAttachmentState(draft?.sessionId === sessionId ? draft : undefined);
   }
 
+  private searchConversationSuggestions(
+    message: Extract<
+      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      { type: 'threads/conversation/suggestion/search' }
+    >
+  ): void {
+    if (!this.canUseConversationSuggestions(message.sessionId, message.threadId, message.kind)) {
+      return;
+    }
+    const search: ConversationSuggestionSearch = {
+      generation: this.generation,
+      sessionId: message.sessionId,
+      threadId: message.threadId,
+      requestId: message.requestId,
+      kind: message.kind,
+      candidates: []
+    };
+    this.conversationSuggestionSearch = search;
+    const result = message.kind === 'file'
+      ? this.searchWorkspaceFiles(message.query)
+      : this.searchAvailableSkills(message.threadId, message.query);
+    void result.then(
+      (candidates) => {
+        if (!this.isCurrentSuggestionSearch(search)) return;
+        search.candidates = candidates.slice(0, MAX_CONVERSATION_SUGGESTIONS);
+        this.postConversationSuggestions(search, message.query, 'ready');
+      },
+      (error: unknown) => {
+        if (!this.isCurrentSuggestionSearch(search)) return;
+        search.candidates = [];
+        this.options.logger.appendLine(
+          `[threads] ${message.kind === 'file' ? 'File' : 'Skill'} suggestions could not be loaded: ${asError(error).message}`
+        );
+        this.postConversationSuggestions(search, message.query, 'unavailable');
+      }
+    );
+  }
+
+  private async searchWorkspaceFiles(query: string): Promise<readonly ConversationSuggestion[]> {
+    const client = this.options.conversationClient;
+    const folders = currentConversationWorkspaceFolders();
+    if (!client.fuzzyFileSearch || folders.length === 0) return [];
+    const roots = folders.map((folder) => normalize(folder.path));
+    const response = await client.fuzzyFileSearch({
+      query,
+      roots,
+      cancellationToken: null
+    });
+    const candidates: ConversationSuggestion[] = [];
+    const seen = new Set<string>();
+    for (const file of response.files) {
+      if (file.match_type !== 'file') continue;
+      const folderIndex = roots.indexOf(normalize(file.root));
+      const folder = folders[folderIndex];
+      if (!folder) continue;
+      const absolutePath = resolveWorkspaceFile(folder.path, file.path);
+      if (!absolutePath) continue;
+      const key = localPathKey(absolutePath);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const workspacePath = relative(normalize(folder.path), absolutePath).split(sep).join('/');
+      candidates.push({
+        id: randomUUID(),
+        kind: 'file',
+        name: basename(absolutePath),
+        path: absolutePath,
+        displayPath: folders.length > 1 ? `${folder.name}/${workspacePath}` : workspacePath
+      });
+      if (candidates.length >= MAX_CONVERSATION_SUGGESTIONS) break;
+    }
+    return candidates;
+  }
+
+  private async searchAvailableSkills(
+    threadId: string,
+    query: string
+  ): Promise<readonly ConversationSuggestion[]> {
+    const client = this.options.conversationClient;
+    if (!client.listSkills) return [];
+    const draft = this.newConversationDraft;
+    const cwd = draft?.draftId === threadId
+      ? draft.cwd
+      : this.conversationSession?.snapshot().model.cwd;
+    if (!cwd) return [];
+    const response = await client.listSkills({ cwds: [cwd], forceReload: false });
+    const normalizedQuery = query.toLocaleLowerCase();
+    return response.data
+      .filter((entry) => entry.cwd === cwd)
+      .flatMap((entry) => entry.skills)
+      .filter((skill) => skill.enabled)
+      .map((skill) => ({
+        skill,
+        description: skill.shortDescription ?? skill.description,
+        rank: suggestionMatchRank(
+          normalizedQuery,
+          skill.name.toLocaleLowerCase(),
+          (skill.shortDescription ?? skill.description).toLocaleLowerCase()
+        )
+      }))
+      .filter((candidate) => candidate.rank >= 0)
+      .sort((left, right) => left.rank - right.rank || left.skill.name.localeCompare(right.skill.name))
+      .slice(0, MAX_CONVERSATION_SUGGESTIONS)
+      .flatMap(({ skill, description }) => {
+        const validated = validatePickedSkill({ name: skill.name, path: skill.path, description });
+        return validated
+          ? [{
+            id: randomUUID(),
+            kind: 'skill' as const,
+            skill: validated
+          }]
+          : [];
+      });
+  }
+
+  private selectConversationSuggestion(
+    message: Extract<
+      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      { type: 'threads/conversation/suggestion/select' }
+    >
+  ): void {
+    const search = this.conversationSuggestionSearch;
+    const candidate = search?.candidates.find((item) => item.id === message.suggestionId);
+    if (
+      !search ||
+      search.requestId !== message.requestId ||
+      search.sessionId !== message.sessionId ||
+      search.threadId !== message.threadId ||
+      !candidate ||
+      !this.canUseConversationSuggestions(message.sessionId, message.threadId, search.kind)
+    ) {
+      this.postConversationSuggestionSelection(message, 'rejected');
+      return;
+    }
+    this.conversationSuggestionSearch = undefined;
+    void this.addSuggestedAttachment(search, candidate).then((accepted) => {
+      this.postConversationSuggestionSelection(message, accepted ? 'accepted' : 'rejected');
+    });
+  }
+
+  private async addSuggestedAttachment(
+    search: ConversationSuggestionSearch,
+    candidate: ConversationSuggestion
+  ): Promise<boolean> {
+    const draft = this.newConversationDraft;
+    const attachments = draft?.sessionId === search.sessionId && draft.draftId === search.threadId
+      ? draft.attachments
+      : this.restoreConversationDraft(search.threadId).attachments;
+    if (candidate.kind === 'file') {
+      const workspacePath = resolveCurrentWorkspaceFile(candidate.path);
+      if (!workspacePath) return false;
+      let sizeBytes = 0;
+      try {
+        const stat = await vscode.workspace.fs.stat(vscode.Uri.file(workspacePath));
+        sizeBytes = stat.type === vscode.FileType.File ? stat.size : 0;
+      } catch {
+        return false;
+      }
+      if (
+        !this.isCurrentSuggestionTarget(search) ||
+        !validatePickedMention({ path: workspacePath, sizeBytes })
+      ) {
+        return false;
+      }
+      const key = localPathKey(workspacePath);
+      const duplicate = attachments.some((attachment) =>
+        attachment.kind === 'mention' && localPathKey(attachment.path) === key
+      );
+      if (
+        !duplicate &&
+        attachments.filter((attachment) => attachment.kind === 'mention').length >=
+          MAX_MENTION_ATTACHMENTS
+      ) {
+        return false;
+      }
+      if (!duplicate) {
+        attachments.push({
+          id: randomUUID(),
+          kind: 'mention',
+          path: workspacePath,
+          name: candidate.name,
+          sizeBytes
+        });
+      }
+    } else {
+      if (!this.isCurrentSuggestionTarget(search) || !isRestorableAttachment({
+        id: candidate.id,
+        kind: 'skill',
+        ...candidate.skill
+      })) {
+        return false;
+      }
+      const key = localPathKey(candidate.skill.path);
+      const duplicate = attachments.some((attachment) =>
+        attachment.kind === 'skill' && localPathKey(attachment.path) === key
+      );
+      if (
+        !duplicate &&
+        attachments.filter((attachment) => attachment.kind === 'skill').length >=
+          MAX_SKILL_ATTACHMENTS
+      ) {
+        return false;
+      }
+      if (!duplicate) {
+        attachments.push({
+          id: randomUUID(),
+          kind: 'skill',
+          ...candidate.skill
+        });
+      }
+    }
+    this.postAttachmentState(draft?.sessionId === search.sessionId ? draft : undefined);
+    return true;
+  }
+
+  private clearConversationSuggestions(
+    sessionId: string,
+    threadId: string,
+    requestId: string
+  ): void {
+    const search = this.conversationSuggestionSearch;
+    if (
+      search?.sessionId === sessionId &&
+      search.threadId === threadId &&
+      search.requestId === requestId
+    ) {
+      this.conversationSuggestionSearch = undefined;
+    }
+  }
+
+  private canUseConversationSuggestions(
+    sessionId: string,
+    threadId: string,
+    kind: ConversationSuggestionKind
+  ): boolean {
+    if (!this.isCurrentSession(sessionId, threadId)) return false;
+    const draft = this.newConversationDraft;
+    const idle = draft?.sessionId === sessionId && draft.draftId === threadId
+      ? !draft.createPending
+      : this.conversationSession?.snapshot().operation === 'idle';
+    if (!idle) return false;
+    return kind === 'file'
+      ? Boolean(this.options.conversationClient.fuzzyFileSearch)
+      : Boolean(this.options.conversationClient.listSkills);
+  }
+
+  private isCurrentSuggestionSearch(search: ConversationSuggestionSearch): boolean {
+    return (
+      this.conversationSuggestionSearch === search &&
+      this.isCurrentSuggestionTarget(search)
+    );
+  }
+
+  private isCurrentSuggestionTarget(search: ConversationSuggestionSearch): boolean {
+    return (
+      search.generation === this.generation &&
+      this.isCurrentSession(search.sessionId, search.threadId) &&
+      this.canUseConversationSuggestions(search.sessionId, search.threadId, search.kind)
+    );
+  }
+
+  private postConversationSuggestions(
+    search: ConversationSuggestionSearch,
+    query: string,
+    outcome: 'ready' | 'unavailable'
+  ): void {
+    const suggestions: ConversationSuggestionViewModel[] = search.candidates.map((candidate) =>
+      candidate.kind === 'file'
+        ? {
+          id: candidate.id,
+          kind: candidate.kind,
+          name: candidate.name,
+          path: candidate.displayPath
+        }
+        : {
+          id: candidate.id,
+          kind: candidate.kind,
+          name: candidate.skill.name,
+          description: candidate.skill.description
+        }
+    );
+    this.post({
+      type: 'threads/conversationSuggestions',
+      sessionId: search.sessionId,
+      threadId: search.threadId,
+      requestId: search.requestId,
+      kind: search.kind,
+      query,
+      outcome,
+      suggestions
+    });
+  }
+
+  private postConversationSuggestionSelection(
+    message: {
+      readonly sessionId: string;
+      readonly threadId: string;
+      readonly requestId: string;
+      readonly suggestionId: string;
+    },
+    outcome: 'accepted' | 'rejected'
+  ): void {
+    this.post({
+      type: 'threads/conversationSuggestionSelection',
+      sessionId: message.sessionId,
+      threadId: message.threadId,
+      requestId: message.requestId,
+      suggestionId: message.suggestionId,
+      outcome
+    });
+  }
+
   private postAttachmentState(draft?: NewConversationDraft): void {
     if (draft && this.isCurrentDraft(draft)) {
       this.postNewConversationState(draft, draftExecution(draft));
@@ -1772,6 +2121,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.newConversationDraft = undefined;
     this.pendingConversationLoad = undefined;
     this.pendingConversationPost = undefined;
+    this.conversationSuggestionSearch = undefined;
     if (this.conversationPostTimer !== undefined) {
       clearTimeout(this.conversationPostTimer);
       this.conversationPostTimer = undefined;
@@ -2111,6 +2461,41 @@ function currentConversationWorkspaceFolders(): readonly ConversationWorkspaceFo
     path: folder.uri.fsPath,
     name: folder.name
   }));
+}
+
+function resolveWorkspaceFile(root: string, candidatePath: string): string | undefined {
+  const normalizedRoot = normalize(root);
+  const absolutePath = normalize(isAbsolute(candidatePath)
+    ? candidatePath
+    : resolve(normalizedRoot, candidatePath));
+  const relativePath = relative(normalizedRoot, absolutePath);
+  if (
+    !relativePath ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath)
+  ) {
+    return undefined;
+  }
+  return absolutePath;
+}
+
+function resolveCurrentWorkspaceFile(candidatePath: string): string | undefined {
+  for (const folder of currentConversationWorkspaceFolders()) {
+    const resolved = resolveWorkspaceFile(folder.path, candidatePath);
+    if (resolved && localPathKey(resolved) === localPathKey(candidatePath)) {
+      return resolved;
+    }
+  }
+  return undefined;
+}
+
+function suggestionMatchRank(query: string, name: string, description: string): number {
+  if (!query) return 0;
+  if (name.startsWith(query)) return 0;
+  if (name.includes(query)) return 1;
+  if (description.includes(query)) return 2;
+  return -1;
 }
 
 export function newConversationPermissions(permission: NewConversationDefaults['permission'] | undefined): {
