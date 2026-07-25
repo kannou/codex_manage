@@ -56,6 +56,7 @@ interface ConversationComposerTarget {
   readonly send: HTMLButtonElement;
   readonly stop: HTMLButtonElement;
   readonly activityIndicator: HTMLElement;
+  readonly contextWindow: HTMLElement;
   readonly status: HTMLElement;
   readonly error: HTMLElement;
   readonly announcer: HTMLElement;
@@ -826,6 +827,9 @@ function showConversationShell(
     document.createElement('span'),
     document.createElement('span')
   );
+  const contextWindow = document.createElement('span');
+  contextWindow.className = 'conversation-context-window';
+  contextWindow.hidden = true;
   const controls = document.createElement('div');
   controls.className = 'conversation-composer-controls';
   const stop = actionButton('Stop', 'stop');
@@ -835,7 +839,7 @@ function showConversationShell(
   const send = actionButton('Send', 'send');
   send.className = 'conversation-send';
   send.title = 'Send (Ctrl/Cmd+Enter)';
-  info.append(usageButton, activityIndicator, status);
+  info.append(usageButton, contextWindow, activityIndicator, status);
   controls.append(stop, send);
   footer.append(info, controls);
   composer.append(latest, tools, attachments, inputLabel, input, error, usagePanel, footer);
@@ -848,7 +852,7 @@ function showConversationShell(
   conversationTitleStatus = titleStatus;
   conversationLatestButton = latest;
   conversationComposerTarget = {
-    container: composer, input, send, stop, activityIndicator, status, error, announcer,
+    container: composer, input, send, stop, activityIndicator, contextWindow, status, error, announcer,
     usageButton, usagePanel,
     add, addMenu, attachments, settings, settingsSummary, settingsCurrent,
     model: model.select,
@@ -1423,6 +1427,13 @@ function updateConversationComposer(): void {
     Boolean(pendingConversationStopRequestId)
   );
   target.activityIndicator.hidden = !activity.activityVisible;
+  const remaining = conversationScreenState?.contextWindowRemainingPercent;
+  target.contextWindow.hidden = remaining === undefined || remaining === null;
+  if (!target.contextWindow.hidden) {
+    target.contextWindow.textContent = `${remaining}%`;
+    target.contextWindow.title = `Context window: ${remaining}% left`;
+    target.contextWindow.setAttribute('aria-label', `Context window: ${remaining}% left`);
+  }
   target.status.classList.toggle('sr-only', activity.activityVisible);
   if (target.status.textContent !== activity.statusText) {
     target.status.textContent = activity.statusText;

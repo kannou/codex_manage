@@ -17,6 +17,7 @@ import type { TurnError } from './generated/v2/TurnError';
 import type { TurnInterruptResponse } from './generated/v2/TurnInterruptResponse';
 import type { TurnStartResponse } from './generated/v2/TurnStartResponse';
 import type { GetAccountRateLimitsResponse } from './generated/v2/GetAccountRateLimitsResponse';
+import type { ThreadTokenUsageUpdatedNotification } from './generated/v2/ThreadTokenUsageUpdatedNotification';
 
 type ConversationNotificationMethod =
   | 'error'
@@ -57,6 +58,26 @@ export function parseAccountRateLimitsResponse(value: unknown): GetAccountRateLi
 export function parseRateLimitSnapshot(value: unknown): GetAccountRateLimitsResponse['rateLimits'] {
   if (!isRateLimitSnapshot(value)) throw new Error('App Server returned invalid rate limit data.');
   return value;
+}
+
+export function parseThreadTokenUsageUpdated(value: unknown): ThreadTokenUsageUpdatedNotification {
+  if (
+    !isJsonObject(value) || typeof value.threadId !== 'string' || typeof value.turnId !== 'string' ||
+    !isJsonObject(value.tokenUsage) || !isTokenUsageBreakdown(value.tokenUsage.total) ||
+    !isTokenUsageBreakdown(value.tokenUsage.last) || !(
+      value.tokenUsage.modelContextWindow === null ||
+      (isFiniteNumber(value.tokenUsage.modelContextWindow) && value.tokenUsage.modelContextWindow > 0)
+    )
+  ) {
+    throw new Error('App Server returned an invalid thread/tokenUsage/updated notification.');
+  }
+  return value as ThreadTokenUsageUpdatedNotification;
+}
+
+function isTokenUsageBreakdown(value: unknown): boolean {
+  return isJsonObject(value) && [value.totalTokens, value.inputTokens, value.cachedInputTokens,
+    value.outputTokens, value.reasoningOutputTokens]
+    .every((item) => isFiniteNumber(item) && item >= 0);
 }
 
 function isRateLimitSnapshot(value: unknown): value is GetAccountRateLimitsResponse['rateLimits'] {

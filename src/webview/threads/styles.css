@@ -814,6 +814,15 @@ button.conversation-attachment-remove:focus-visible {
 
 .conversation-composer-status:empty { display: none; }
 
+.conversation-context-window {
+  flex: 0 0 3.5ch;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .conversation-activity-indicator {
   width: 18px;
   height: 8px;
