@@ -82,6 +82,7 @@ export interface ConversationScreenState {
   readonly attachments: readonly ConversationAttachmentViewModel[];
   readonly interactions: readonly ConversationInteractionViewModel[];
   readonly bookmarkedTurnIds: readonly string[];
+  readonly contextWindowRemainingPercent?: number | null;
   readonly notice?: string;
 }
 
@@ -563,6 +564,8 @@ export function isConversationScreenState(value: unknown): value is Conversation
     value.attachments.every(isConversationAttachment) &&
     Array.isArray(value.interactions) && value.interactions.every(isConversationInteraction) &&
     isBookmarkedTurnIds(value.bookmarkedTurnIds, value.model) &&
+    (value.contextWindowRemainingPercent === undefined || value.contextWindowRemainingPercent === null ||
+      isPercent(value.contextWindowRemainingPercent)) &&
     (value.notice === undefined || typeof value.notice === 'string')
   );
 }

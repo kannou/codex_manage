@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import type { AppServerNotification, AppServerRequest } from '../codex/appServerClient';
 import {
   isJsonObject,
+  parseThreadTokenUsageUpdated,
   parseConversationNotification,
   type ConversationNotification
 } from '../codex/protocol/guards';
@@ -215,6 +216,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private readonly conversationDrafts = new Map<string, ConversationDraft>();
   private readonly pendingBookmarkUpdates = new Set<string>();
   private readonly latestCompletedTurnByThread = new Map<string, string>();
+  private readonly contextWindowByThread = new Map<string, { turnId: string; remainingPercent: number }>();
   private readonly unreadCompletedTurnByThread = new Map<string, string>();
   private conversationScreenOpen = false;
   private webviewFocused = false;
@@ -576,6 +578,29 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         this.postUsage(this.accountRateLimits);
       } catch (error) {
         this.options.logger.appendLine(`[threads] Ignored malformed rate limit update: ${asError(error).message}`);
+      }
+      return;
+    }
+    if (notification.method === 'thread/tokenUsage/updated') {
+      try {
+        const update = parseThreadTokenUsageUpdated(notification.params);
+        const session = this.conversationSessions.get(update.threadId);
+        const latestTurnId = session?.snapshot().model.turns.at(-1)?.id;
+        if (latestTurnId !== update.turnId) return;
+        if (update.tokenUsage.modelContextWindow === null) {
+          this.contextWindowByThread.delete(update.threadId);
+          if (update.threadId === this.activeThread?.id) this.postCurrentConversationState();
+          return;
+        }
+        const used = update.tokenUsage.total.totalTokens;
+        const remainingPercent = Math.round(Math.max(0, Math.min(
+          100,
+          (1 - used / update.tokenUsage.modelContextWindow) * 100
+        )));
+        this.contextWindowByThread.set(update.threadId, { turnId: update.turnId, remainingPercent });
+        if (update.threadId === this.activeThread?.id) this.postCurrentConversationState();
+      } catch (error) {
+        this.options.logger.appendLine(`[threads] Ignored malformed token usage update: ${asError(error).message}`);
       }
       return;
     }
@@ -1881,6 +1906,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       attachments: draft.attachments.map(toAttachmentViewModel),
       interactions: [],
       bookmarkedTurnIds: [],
+      contextWindowRemainingPercent: null,
       ...(notice ? { notice } : {})
     };
   }
@@ -1913,6 +1939,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       draft.text,
       draft.attachments.map(toAttachmentViewModel),
       bookmarkedTurnIds,
+      contextWindowRemainingPercent(snapshot, this.contextWindowByThread),
       draft.notice
     );
   }
@@ -2360,6 +2387,7 @@ function toConversationScreenState(
   draftText: string,
   attachments: ConversationScreenState['attachments'],
   bookmarkedTurnIds: ConversationScreenState['bookmarkedTurnIds'],
+  contextWindowRemainingPercent: number | null,
   draftNotice?: string
 ): ConversationScreenState {
   const execution = toConversationExecution(snapshot);
@@ -2376,6 +2404,7 @@ function toConversationScreenState(
       attachments,
       interactions,
       bookmarkedTurnIds,
+      contextWindowRemainingPercent,
       notice
     }
     : {
@@ -2388,8 +2417,17 @@ function toConversationScreenState(
       draftText,
       attachments,
       interactions,
-      bookmarkedTurnIds
+      bookmarkedTurnIds,
+      contextWindowRemainingPercent
     };
+}
+
+function contextWindowRemainingPercent(
+  snapshot: ConversationSessionSnapshot,
+  values: ReadonlyMap<string, { turnId: string; remainingPercent: number }>
+): number | null {
+  const value = values.get(snapshot.model.threadId);
+  return value && value.turnId === snapshot.model.turns.at(-1)?.id ? value.remainingPercent : null;
 }
 
 function cancellationResponse(method: string): unknown {

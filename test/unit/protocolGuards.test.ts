@@ -9,11 +9,42 @@ import {
   parseSkillsListResponse,
   parseThreadListResponse,
   parseThreadReadResponse,
-  parseThreadStartResponse
+  parseThreadStartResponse,
+  parseThreadTokenUsageUpdated
 } from '../../src/codex/protocol/guards';
 import { createThread, createTurn } from '../support/threadFixture';
 
 const validThread = createThread();
+
+test('validates thread token usage updates at the protocol boundary', () => {
+  const breakdown = {
+    totalTokens: 25,
+    inputTokens: 20,
+    cachedInputTokens: 5,
+    outputTokens: 5,
+    reasoningOutputTokens: 2
+  };
+  const update = {
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: 100 }
+  };
+  assert.equal(parseThreadTokenUsageUpdated(update).tokenUsage.modelContextWindow, 100);
+  assert.throws(
+    () => parseThreadTokenUsageUpdated({
+      ...update,
+      tokenUsage: { ...update.tokenUsage, modelContextWindow: 0 }
+    }),
+    /invalid thread\/tokenUsage\/updated notification/u
+  );
+  assert.throws(
+    () => parseThreadTokenUsageUpdated({
+      ...update,
+      tokenUsage: { ...update.tokenUsage, total: { ...breakdown, totalTokens: -1 } }
+    }),
+    /invalid thread\/tokenUsage\/updated notification/u
+  );
+});
 
 test('validates account usage percentages and reset timestamps', () => {
   const snapshot = {
