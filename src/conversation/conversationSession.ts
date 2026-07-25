@@ -874,7 +874,7 @@ export function createConversationRuntimeSettings(
   }
   return {
     status: 'ready',
-    models: modelOptions,
+    models: deduplicateRuntimeOptions(modelOptions, modelSelection),
     model: modelSelection,
     efforts: effortOptions,
     effort,
@@ -925,7 +925,16 @@ export function conversationRuntimeModelValue(models: readonly Model[], selectio
 }
 
 export function visibleConversationModels(models: readonly Model[]): readonly Model[] {
-  return models.filter((model) => !model.hidden);
+  const visibleModels: Model[] = [];
+  const seenRuntimeModels = new Set<string>();
+  for (const model of models) {
+    if (model.hidden) continue;
+    const runtimeModel = model.model || model.id;
+    if (seenRuntimeModels.has(runtimeModel)) continue;
+    seenRuntimeModels.add(runtimeModel);
+    visibleModels.push(model);
+  }
+  return visibleModels;
 }
 
 export async function loadConversationModelCatalog(
@@ -946,6 +955,29 @@ export async function loadConversationModelCatalog(
 
 function runtimeValueLabel(value: string): string {
   return value ? `${value[0]?.toUpperCase() ?? ''}${value.slice(1)}` : value;
+}
+
+function deduplicateRuntimeOptions(
+  options: readonly ConversationRuntimeOption[],
+  selectedValue: string
+): readonly ConversationRuntimeOption[] {
+  const uniqueOptions: ConversationRuntimeOption[] = [];
+  const indexByLabel = new Map<string, number>();
+  for (const option of options) {
+    const visibleLabel = option.label
+      .replace(/\s*\(current, unlisted\)\s*$/iu, '')
+      .trim()
+      .toLowerCase();
+    const key = visibleLabel || option.value;
+    const existingIndex = indexByLabel.get(key);
+    if (existingIndex === undefined) {
+      indexByLabel.set(key, uniqueOptions.length);
+      uniqueOptions.push(option);
+    } else if (option.value === selectedValue) {
+      uniqueOptions[existingIndex] = option;
+    }
+  }
+  return uniqueOptions;
 }
 
 function sandboxModeFromPolicy(policy: SandboxPolicy): SandboxMode {
