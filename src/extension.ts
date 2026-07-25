@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AppServerClient } from './codex/appServerClient';
 import { ThreadRepository } from './codex/threadRepository';
 import { AppServerError } from './common/errors';
+import { createCoalescingTaskRunner } from './common/coalescingTaskRunner';
 import {
   CONVERSATION_VIEW_TYPE,
   ConversationPanelManager
@@ -69,6 +70,10 @@ export function activate(context: vscode.ExtensionContext): void {
     return (await client.readThread({ threadId, includeTurns: true })).thread;
   };
 
+  const threadRefreshRunner = createCoalescingTaskRunner(refreshThreads);
+  const requestThreadRefresh = (notifyOnError: boolean): Promise<void> =>
+    threadRefreshRunner.run(notifyOnError);
+
   const provider = new ThreadListWebviewProvider({
     extensionUri: context.extensionUri,
     turnBookmarkStore,
@@ -106,11 +111,14 @@ export function activate(context: vscode.ExtensionContext): void {
     onConversationScreenChange: (open) => {
       void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, open);
     },
+    onListRefreshRequested: () => {
+      void requestThreadRefresh(false);
+    },
     respondToServerRequest: (id, result) => (activeClient ?? replaceClient()).respondToServerRequest(id, result),
     logger: output
   });
 
-  const refreshThreads = async (notifyOnError: boolean): Promise<void> => {
+  async function refreshThreads(notifyOnError: boolean): Promise<void> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders?.length) {
       probeGeneration += 1;
@@ -154,10 +162,10 @@ export function activate(context: vscode.ExtensionContext): void {
       provider.setConnectionStatus({ kind: 'error', message });
       output.appendLine(`[connection] ${message}`);
       if (notifyOnError) {
-        await showConnectionError(error, refreshThreads);
+        await showConnectionError(error, requestThreadRefresh);
       }
     }
-  };
+  }
 
 
   const loadMoreThreads = async (group: 'active' | 'archive'): Promise<void> => {
@@ -184,7 +192,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const message = connectionErrorMessage(error);
       provider.setConnectionStatus({ kind: 'error', message });
       output.appendLine(`[thread/list] ${message}`);
-      await showConnectionError(error, refreshThreads);
+      await showConnectionError(error, requestThreadRefresh);
     }
   };
 
@@ -210,7 +218,7 @@ export function activate(context: vscode.ExtensionContext): void {
       repository = new ThreadRepository(client);
       repository.setPinnedThreadIds(pinStore.getPinnedThreadIds());
       provider.setSnapshot(repository.snapshot());
-      void refreshThreads(false);
+      void requestThreadRefresh(false);
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('codexThreadManager.codexPath')) {
@@ -220,10 +228,10 @@ export function activate(context: vscode.ExtensionContext): void {
         event.affectsConfiguration('codexThreadManager.codexPath') ||
         event.affectsConfiguration('codexThreadManager.pageSize')
       ) {
-        void refreshThreads(false);
+        void requestThreadRefresh(false);
       }
     }),
-    vscode.commands.registerCommand('codexThreadManager.refresh', () => refreshThreads(true)),
+    vscode.commands.registerCommand('codexThreadManager.refresh', () => requestThreadRefresh(true)),
     vscode.commands.registerCommand('codexThreadManager.openSettings', () =>
       vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${context.extension.id}`)
     ),
@@ -245,7 +253,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   output.appendLine('Codex Thread Manager activated.');
   void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, false);
-  void refreshThreads(true);
+  void requestThreadRefresh(true);
 }
 
 export function deactivate(): void {
@@ -431,7 +439,7 @@ async function showConnectionError(
   if (selection === 'Open Settings') {
     await vscode.commands.executeCommand('workbench.action.openSettings', 'codexThreadManager.codexPath');
   } else if (selection === 'Retry') {
-    await retry(true);
+    void retry(true);
   }
 }
 

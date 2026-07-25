@@ -80,6 +80,7 @@ export interface ThreadListWebviewProviderOptions {
   readonly onConversationCreated?: (thread: Thread) => void;
   readonly renameConversationThread?: (threadId: string, name: string) => Promise<void>;
   readonly onConversationScreenChange?: (open: boolean) => void;
+  readonly onListRefreshRequested?: () => void;
   readonly respondToServerRequest?: (id: AppServerRequest['id'], result: unknown) => Promise<boolean>;
   readonly pickLocalImages?: () => Promise<readonly PickedLocalImage[]>;
   readonly pickMentionFiles?: () => Promise<readonly PickedMentionFile[]>;
@@ -273,6 +274,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
             return;
           case 'threads/back':
             this.showList();
+            this.options.onListRefreshRequested?.();
             return;
           case 'threads/reload':
             if (this.activeThread) {
