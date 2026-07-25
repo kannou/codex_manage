@@ -15,6 +15,7 @@ The MVP is packaged for private VSIX installation. Marketplace publication is no
 - Opens a selected thread's conversation in the same Codex sidebar, including stored user/Codex messages, turn state, and summarized work cards.
 - Sends text prompts to an existing thread, streams Codex replies in place, and stops the active turn when needed.
 - Adds PNG, JPEG, GIF, or WebP images, host-selected file references, and enabled workspace Skills to the next message from the composer Add menu.
+- Suggests workspace files from `@query` and enabled Skills from `$query`, with keyboard, mouse, and IME-safe composer behavior.
 - Starts a workspace-scoped conversation from the sidebar, applies the selected Runtime settings, and sends its first text prompt without creating a duplicate list entry.
 - Shows the selected model, reasoning, and permission labels in the Runtime trigger, adding Fast only when the faster speed is selected.
 - Keeps the last confirmed transcript visible across disconnects and re-synchronizes it with `thread/resume` plus `thread/read` after reconnecting.
@@ -70,11 +71,12 @@ Reload VS Code after installation.
 8. Hover a row or focus it with the keyboard, then use its inline icons to pin, rename, archive, or restore it.
 9. If the selected model supports images, use **Add** > **Add image…** to attach up to 10 PNG, JPEG, GIF, or WebP files of at most 20 MB each.
 10. Use **Add** > **Mention files…** or **Add Skill…** to add file references or enabled Skills to the next message.
-11. Enter a text message and select **Send**, or press Ctrl+Enter / Cmd+Enter. Enter by itself inserts a new line.
-12. While Codex is responding, select **Stop** to interrupt that turn.
-13. Use the star in a turn header to bookmark it, then select it from the conversation header's **Bookmarks** menu to move back to it.
-14. Use the reload icon to reconnect and re-synchronize the selected conversation, then the back icon to return to the list.
-15. Open **View: Toggle Output** and select `Codex Thread Manager` for connection diagnostics.
+11. Type `@query` or `$query` at a word boundary to search workspace files or enabled Skills. Use Arrow Up/Down and Enter or Tab, or select a candidate with the mouse, to convert only that query into an attachment chip.
+12. Enter a text message and select **Send**, or press Ctrl+Enter / Cmd+Enter. Enter by itself inserts a new line.
+13. While Codex is responding, select **Stop** to interrupt that turn.
+14. Use the star in a turn header to bookmark it, then select it from the conversation header's **Bookmarks** menu to move back to it.
+15. Use the reload icon to reconnect and re-synchronize the selected conversation, then the back icon to return to the list.
+16. Open **View: Toggle Output** and select `Codex Thread Manager` for connection diagnostics.
 
 Only threads whose `cwd` exactly matches one of the open workspace folder paths are shown. Threads started in a nested subdirectory are not included in this MVP.
 

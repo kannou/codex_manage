@@ -731,12 +731,13 @@ test('searches and selects correlated file and Skill suggestions without accepti
     suggestionId: fileSuggestionId
   });
   await flushPromises();
+  await flushPromises();
   assert.equal(view.webview.postedMessages.some((message) =>
     (message as { type?: unknown; outcome?: unknown; suggestionId?: unknown }).type ===
       'threads/conversationSuggestionSelection' &&
     (message as { outcome?: unknown }).outcome === 'accepted' &&
     (message as { suggestionId?: unknown }).suggestionId === fileSuggestionId
-  ), true, JSON.stringify(view.webview.postedMessages.slice(-5)));
+  ), true);
 
   view.webview.fire({
     type: 'threads/conversation/suggestion/search',
@@ -775,6 +776,52 @@ test('searches and selects correlated file and Skill suggestions without accepti
     requestId: 'file-new',
     suggestionId: fileSuggestionId
   });
+  await flushPromises();
+  const staleSelection = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type ===
+      'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-new'
+  ) as { outcome: string };
+  assert.equal(staleSelection.outcome, 'rejected');
+
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/search',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-duplicate',
+    kind: 'file',
+    query: 'main'
+  });
+  await flushPromises();
+  const duplicateSuggestions = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type === 'threads/conversationSuggestions' &&
+    (message as { requestId?: unknown }).requestId === 'file-duplicate'
+  ) as { suggestions: Array<{ id: string }> };
+  const duplicateSuggestionId = duplicateSuggestions.suggestions[0]?.id;
+  assert.ok(duplicateSuggestionId);
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/select',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-duplicate',
+    suggestionId: duplicateSuggestionId
+  });
+  await flushPromises();
+  await flushPromises();
+  assert.equal(view.webview.postedMessages.some((message) =>
+    (message as { type?: unknown; requestId?: unknown; outcome?: unknown }).type ===
+      'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-duplicate' &&
+    (message as { outcome?: unknown }).outcome === 'accepted'
+  ), true);
+  const afterDuplicate = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { state?: { attachments?: unknown[] } }).state?.attachments?.length === 2
+  ) as { state: { attachments: Array<{ kind: string; name: string }> } };
+  assert.deepEqual(
+    afterDuplicate.state.attachments.map(({ kind, name }) => ({ kind, name })),
+    [{ kind: 'mention', name: 'main.ts' }, { kind: 'skill', name: 'review' }]
+  );
+
   view.webview.fire({
     type: 'threads/conversation/send',
     sessionId,
@@ -798,12 +845,6 @@ test('searches and selects correlated file and Skill suggestions without accepti
     },
     { type: 'skill', name: 'review', path: skillPath }
   ]);
-  const staleSelection = [...view.webview.postedMessages].reverse().find((message) =>
-    (message as { type?: unknown; requestId?: unknown }).type ===
-      'threads/conversationSuggestionSelection' &&
-    (message as { requestId?: unknown }).requestId === 'file-new'
-  ) as { outcome: string };
-  assert.equal(staleSelection.outcome, 'rejected');
 });
 
 test('restores isolated per-thread drafts and clears them only after an accepted send', async (t) => {

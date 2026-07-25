@@ -14,6 +14,7 @@ import {
   restoreThreadsWebviewState,
   type ConversationOperationResult,
   type ConversationScreenState,
+  type ConversationSuggestionViewModel,
   type ThreadListAction,
   type ThreadListGroupId,
   type ThreadListItemViewModel,
@@ -34,6 +35,11 @@ import {
   type ConversationLatestState
 } from './conversationLatest';
 import { conversationActivityPresentation } from './conversationActivity';
+import {
+  applyComposerSuggestion,
+  findComposerSuggestionTrigger,
+  type ComposerSuggestionTrigger
+} from './suggestions';
 
 interface VsCodeApi<T> {
   postMessage(message: unknown): void;
@@ -65,6 +71,9 @@ interface ConversationComposerTarget {
   readonly add: HTMLButtonElement;
   readonly addMenu: HTMLElement;
   readonly attachments: HTMLElement;
+  readonly suggestionPanel: HTMLElement;
+  readonly suggestionList: HTMLElement;
+  readonly suggestionStatus: HTMLElement;
   readonly settings: HTMLDetailsElement;
   readonly settingsSummary: HTMLElement;
   readonly settingsCurrent: HTMLElement;
@@ -80,6 +89,20 @@ interface ConversationComposerTarget {
 interface PendingConversationSend {
   readonly requestId: string;
   readonly text: string;
+}
+
+interface ActiveConversationSuggestion {
+  readonly requestId: string;
+  readonly trigger: ComposerSuggestionTrigger;
+  suggestions: readonly ConversationSuggestionViewModel[];
+  selectedIndex: number;
+  outcome: 'loading' | 'ready' | 'unavailable';
+}
+
+interface PendingConversationSuggestionSelection {
+  readonly requestId: string;
+  readonly suggestionId: string;
+  readonly trigger: ComposerSuggestionTrigger;
 }
 
 declare function acquireVsCodeApi<T>(): VsCodeApi<T>;
@@ -110,6 +133,10 @@ let conversationLatestState: ConversationLatestState = createConversationLatestS
 let restoredConversationDraftKey: string | undefined;
 let pendingConversationSend: PendingConversationSend | undefined;
 let pendingConversationStopRequestId: string | undefined;
+let activeConversationSuggestion: ActiveConversationSuggestion | undefined;
+let pendingConversationSuggestionSelection: PendingConversationSuggestionSelection | undefined;
+let conversationSuggestionTimer: ReturnType<typeof setTimeout> | undefined;
+let conversationInputComposing = false;
 let pendingThreadCardFocus: ThreadCardFocus | undefined;
 let pendingThreadGroupFocusId: ThreadListGroupId | undefined;
 let listRenderGeneration = 0;
@@ -199,6 +226,10 @@ app.addEventListener('click', (event) => {
     removeAttachment(element.dataset.attachmentId);
     return;
   }
+  if (action === 'select-suggestion') {
+    selectConversationSuggestion(element.dataset.suggestionId);
+    return;
+  }
   if (action === 'bookmark-toggle') {
     toggleTurnBookmark(element.dataset.turnId);
     return;
@@ -260,10 +291,25 @@ document.addEventListener('click', (event) => {
   }
   if (target && !target.usagePanel.hidden && event.target instanceof Node &&
       !target.usagePanel.contains(event.target) && event.target !== target.usageButton) closeUsagePanel(false);
+  if (
+    target &&
+    activeConversationSuggestion &&
+    event.target instanceof Node &&
+    !target.suggestionPanel.contains(event.target) &&
+    event.target !== target.input
+  ) {
+    closeConversationSuggestions(true);
+  }
 });
 
 app.addEventListener('keydown', (event) => {
   if (!(event instanceof KeyboardEvent)) {
+    return;
+  }
+  if (
+    event.target === conversationComposerTarget?.input &&
+    handleConversationSuggestionKeydown(event)
+  ) {
     return;
   }
   if (event.key === 'Escape' && conversationComposerTarget?.settings.open) {
@@ -321,6 +367,7 @@ app.addEventListener('input', (event) => {
   if (event.target === conversationComposerTarget?.input) {
     updateConversationDraft();
     updateConversationComposer();
+    if (!conversationInputComposing) scheduleConversationSuggestions();
   }
 });
 
@@ -425,6 +472,12 @@ function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
       return;
     case 'threads/conversationCopyResult':
       handleConversationCopyResult(message);
+      return;
+    case 'threads/conversationSuggestions':
+      handleConversationSuggestions(message);
+      return;
+    case 'threads/conversationSuggestionSelection':
+      handleConversationSuggestionSelection(message);
       return;
     case 'threads/conversationUsage':
       renderUsage(message);
@@ -748,6 +801,7 @@ function showConversationShell(
     if (settings.open) {
       addMenu.hidden = true;
       add.setAttribute('aria-expanded', 'false');
+      closeConversationSuggestions(true);
     }
   });
   const settingsGrid = document.createElement('div');
@@ -790,6 +844,39 @@ function showConversationShell(
   input.maxLength = MAX_COMPOSER_TEXT_LENGTH;
   input.placeholder = 'Message Codex…';
   input.setAttribute('aria-describedby', 'conversation-composer-status conversation-composer-error');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-controls', 'conversation-suggestion-list');
+  input.setAttribute('aria-expanded', 'false');
+  input.addEventListener('compositionstart', () => {
+    conversationInputComposing = true;
+    closeConversationSuggestions(true);
+  });
+  input.addEventListener('compositionend', () => {
+    conversationInputComposing = false;
+    scheduleConversationSuggestions();
+  });
+  input.addEventListener('click', () => {
+    if (!conversationInputComposing) scheduleConversationSuggestions();
+  });
+  input.addEventListener('select', () => {
+    if (!conversationInputComposing) scheduleConversationSuggestions();
+  });
+
+  const suggestionPanel = document.createElement('section');
+  suggestionPanel.className = 'conversation-suggestion-panel';
+  suggestionPanel.setAttribute('aria-label', 'Composer suggestions');
+  suggestionPanel.hidden = true;
+  const suggestionList = document.createElement('div');
+  suggestionList.id = 'conversation-suggestion-list';
+  suggestionList.className = 'conversation-suggestion-list';
+  suggestionList.setAttribute('role', 'listbox');
+  suggestionList.setAttribute('aria-label', 'Composer suggestions');
+  const suggestionStatus = document.createElement('div');
+  suggestionStatus.className = 'sr-only';
+  suggestionStatus.setAttribute('role', 'status');
+  suggestionStatus.setAttribute('aria-live', 'polite');
+  suggestionStatus.setAttribute('aria-atomic', 'true');
+  suggestionPanel.append(suggestionList);
 
   const error = document.createElement('p');
   error.id = 'conversation-composer-error';
@@ -842,7 +929,18 @@ function showConversationShell(
   info.append(usageButton, contextWindow, activityIndicator, status);
   controls.append(stop, send);
   footer.append(info, controls);
-  composer.append(latest, tools, attachments, inputLabel, input, error, usagePanel, footer);
+  composer.append(
+    latest,
+    tools,
+    attachments,
+    suggestionPanel,
+    suggestionStatus,
+    inputLabel,
+    input,
+    error,
+    usagePanel,
+    footer
+  );
 
   section.append(header, notice, content, interactions, announcer, composer);
   app.append(section);
@@ -854,7 +952,8 @@ function showConversationShell(
   conversationComposerTarget = {
     container: composer, input, send, stop, activityIndicator, contextWindow, status, error, announcer,
     usageButton, usagePanel,
-    add, addMenu, attachments, settings, settingsSummary, settingsCurrent,
+    add, addMenu, attachments, suggestionPanel, suggestionList, suggestionStatus,
+    settings, settingsSummary, settingsCurrent,
     model: model.select,
     effort: effort.select,
     serviceTier: serviceTier.select,
@@ -894,6 +993,10 @@ function beginConversationSession(sessionId: string): void {
   restoredConversationDraftKey = undefined;
   pendingConversationSend = undefined;
   pendingConversationStopRequestId = undefined;
+  clearConversationSuggestionTimer();
+  activeConversationSuggestion = undefined;
+  pendingConversationSuggestionSelection = undefined;
+  conversationInputComposing = false;
   clearConversationOperationError();
   updateConversationComposer();
 }
@@ -923,6 +1026,10 @@ function resetConversationContext(): void {
   restoredConversationDraftKey = undefined;
   pendingConversationSend = undefined;
   pendingConversationStopRequestId = undefined;
+  clearConversationSuggestionTimer();
+  activeConversationSuggestion = undefined;
+  pendingConversationSuggestionSelection = undefined;
+  conversationInputComposing = false;
 }
 
 function beginConversationTitleEdit(): void {
@@ -1238,6 +1345,7 @@ function submitConversation(): void {
   }
 
   const requestId = createConversationRequestId();
+  closeConversationSuggestions(true);
   pendingConversationSend = { requestId, text };
   clearConversationOperationError();
   updateConversationComposer();
@@ -1273,6 +1381,7 @@ function addConversationInput(kind: 'localImage' | 'mention' | 'skill'): void {
     !state.availableAdditions.includes(kind) ||
     pendingConversationSend
   ) return;
+  closeConversationSuggestions(true);
   closeAddMenu(false);
   vscode.postMessage({
     type: kind === 'localImage'
@@ -1300,6 +1409,319 @@ function removeAttachment(attachmentId: string | undefined): void {
     threadId,
     attachmentId
   });
+}
+
+function scheduleConversationSuggestions(): void {
+  const target = conversationComposerTarget;
+  const state = conversationScreenState;
+  const sessionId = conversationSessionId;
+  const threadId = conversationThreadId;
+  if (
+    !target ||
+    !state ||
+    !sessionId ||
+    !threadId ||
+    conversationInputComposing ||
+    state.execution.kind !== 'idle' ||
+    pendingConversationSend ||
+    pendingConversationSuggestionSelection ||
+    target.input.disabled ||
+    target.input.readOnly
+  ) {
+    closeConversationSuggestions(true);
+    return;
+  }
+  const trigger = findComposerSuggestionTrigger(
+    target.input.value,
+    target.input.selectionStart,
+    target.input.selectionEnd
+  );
+  const available = trigger?.kind === 'file'
+    ? state.availableAdditions.includes('mention')
+    : trigger?.kind === 'skill'
+      ? state.availableAdditions.includes('skill')
+      : false;
+  if (!trigger || !available) {
+    closeConversationSuggestions(true);
+    return;
+  }
+  const current = activeConversationSuggestion;
+  if (
+    current &&
+    current.trigger.kind === trigger.kind &&
+    current.trigger.query === trigger.query &&
+    current.trigger.start === trigger.start &&
+    current.trigger.end === trigger.end
+  ) {
+    return;
+  }
+  closeConversationSuggestions(true);
+  const suggestion: ActiveConversationSuggestion = {
+    requestId: createConversationRequestId(),
+    trigger,
+    suggestions: [],
+    selectedIndex: 0,
+    outcome: 'loading'
+  };
+  activeConversationSuggestion = suggestion;
+  target.settings.open = false;
+  closeAddMenu(false);
+  closeUsagePanel(false);
+  renderConversationSuggestions();
+  conversationSuggestionTimer = setTimeout(() => {
+    conversationSuggestionTimer = undefined;
+    if (
+      activeConversationSuggestion !== suggestion ||
+      !isActiveConversation(sessionId, threadId)
+    ) {
+      return;
+    }
+    vscode.postMessage({
+      type: 'threads/conversation/suggestion/search',
+      sessionId,
+      threadId,
+      requestId: suggestion.requestId,
+      kind: suggestion.trigger.kind,
+      query: suggestion.trigger.query
+    });
+  }, 150);
+}
+
+function handleConversationSuggestions(
+  message: Extract<ThreadsHostToWebviewMessage, { type: 'threads/conversationSuggestions' }>
+): void {
+  const active = activeConversationSuggestion;
+  const target = conversationComposerTarget;
+  if (
+    !active ||
+    !target ||
+    !isActiveConversation(message.sessionId, message.threadId) ||
+    active.requestId !== message.requestId ||
+    active.trigger.kind !== message.kind ||
+    active.trigger.query !== message.query
+  ) {
+    return;
+  }
+  const currentTrigger = findComposerSuggestionTrigger(
+    target.input.value,
+    target.input.selectionStart,
+    target.input.selectionEnd
+  );
+  if (
+    !currentTrigger ||
+    currentTrigger.start !== active.trigger.start ||
+    currentTrigger.end !== active.trigger.end ||
+    currentTrigger.kind !== active.trigger.kind ||
+    currentTrigger.query !== active.trigger.query
+  ) {
+    closeConversationSuggestions(true);
+    return;
+  }
+  active.outcome = message.outcome;
+  active.suggestions = message.suggestions;
+  active.selectedIndex = 0;
+  renderConversationSuggestions();
+}
+
+function selectConversationSuggestion(suggestionId: string | undefined): void {
+  const active = activeConversationSuggestion;
+  const target = conversationComposerTarget;
+  const sessionId = conversationSessionId;
+  const threadId = conversationThreadId;
+  const suggestion = active?.suggestions.find((candidate) => candidate.id === suggestionId);
+  if (
+    !active ||
+    !target ||
+    !sessionId ||
+    !threadId ||
+    !suggestion ||
+    active.outcome !== 'ready' ||
+    pendingConversationSuggestionSelection
+  ) {
+    return;
+  }
+  pendingConversationSuggestionSelection = {
+    requestId: active.requestId,
+    suggestionId: suggestion.id,
+    trigger: active.trigger
+  };
+  activeConversationSuggestion = undefined;
+  clearConversationSuggestionTimer();
+  renderConversationSuggestions();
+  updateConversationComposer();
+  vscode.postMessage({
+    type: 'threads/conversation/suggestion/select',
+    sessionId,
+    threadId,
+    requestId: active.requestId,
+    suggestionId: suggestion.id
+  });
+}
+
+function handleConversationSuggestionSelection(
+  message: Extract<
+    ThreadsHostToWebviewMessage,
+    { type: 'threads/conversationSuggestionSelection' }
+  >
+): void {
+  const pending = pendingConversationSuggestionSelection;
+  const target = conversationComposerTarget;
+  if (
+    !pending ||
+    !target ||
+    !isActiveConversation(message.sessionId, message.threadId) ||
+    pending.requestId !== message.requestId ||
+    pending.suggestionId !== message.suggestionId
+  ) {
+    return;
+  }
+  pendingConversationSuggestionSelection = undefined;
+  if (message.outcome === 'accepted') {
+    const applied = applyComposerSuggestion(target.input.value, pending.trigger);
+    if (applied) {
+      target.input.value = applied.text;
+      target.input.setSelectionRange(applied.caret, applied.caret);
+      updateConversationDraft();
+    }
+    target.suggestionStatus.textContent = 'Suggestion added to the next message.';
+  } else {
+    target.suggestionStatus.textContent = 'Suggestion could not be added.';
+  }
+  updateConversationComposer();
+  target.input.focus({ preventScroll: true });
+  if (message.outcome === 'accepted') scheduleConversationSuggestions();
+}
+
+function handleConversationSuggestionKeydown(event: KeyboardEvent): boolean {
+  const active = activeConversationSuggestion;
+  if (!active || event.isComposing) return false;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closeConversationSuggestions(true);
+    return true;
+  }
+  if (
+    active.outcome === 'ready' &&
+    active.suggestions.length > 0 &&
+    (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+  ) {
+    event.preventDefault();
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    active.selectedIndex = (
+      active.selectedIndex + direction + active.suggestions.length
+    ) % active.suggestions.length;
+    renderConversationSuggestions();
+    return true;
+  }
+  if (
+    active.outcome === 'ready' &&
+    active.suggestions.length > 0 &&
+    (event.key === 'Enter' || event.key === 'Tab') &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey
+  ) {
+    event.preventDefault();
+    selectConversationSuggestion(active.suggestions[active.selectedIndex]?.id);
+    return true;
+  }
+  return false;
+}
+
+function renderConversationSuggestions(): void {
+  const target = conversationComposerTarget;
+  if (!target) return;
+  const active = activeConversationSuggestion;
+  target.suggestionPanel.hidden = !active;
+  target.input.setAttribute('aria-expanded', String(Boolean(active)));
+  if (!active) {
+    target.input.removeAttribute('aria-activedescendant');
+    target.suggestionList.replaceChildren();
+    return;
+  }
+  if (active.outcome === 'loading') {
+    const loading = document.createElement('p');
+    loading.className = 'conversation-suggestion-message';
+    loading.textContent = active.trigger.kind === 'file'
+      ? 'Searching workspace files…'
+      : 'Loading Skills…';
+    target.suggestionList.replaceChildren(loading);
+    target.suggestionStatus.textContent = loading.textContent;
+    return;
+  }
+  if (active.outcome === 'unavailable' || active.suggestions.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'conversation-suggestion-message';
+    empty.textContent = active.outcome === 'unavailable'
+      ? 'Suggestions unavailable.'
+      : `No matching ${active.trigger.kind === 'file' ? 'files' : 'Skills'}.`;
+    target.suggestionList.replaceChildren(empty);
+    target.suggestionStatus.textContent = empty.textContent;
+    return;
+  }
+  const options = active.suggestions.map((suggestion, index) => {
+    const option = actionButton('', 'select-suggestion');
+    option.id = `conversation-suggestion-${suggestion.id}`;
+    option.className = 'conversation-suggestion';
+    option.dataset.suggestionId = suggestion.id;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', String(index === active.selectedIndex));
+    option.classList.toggle('is-selected', index === active.selectedIndex);
+    const name = document.createElement('span');
+    name.className = 'conversation-suggestion-name';
+    name.textContent = `${suggestion.kind === 'file' ? '@' : '$'}${suggestion.name}`;
+    const detail = document.createElement('span');
+    detail.className = 'conversation-suggestion-detail';
+    detail.textContent = suggestion.kind === 'file' ? suggestion.path : suggestion.description;
+    option.append(name, detail);
+    option.addEventListener('mousedown', (event) => event.preventDefault());
+    option.addEventListener('mousemove', () => {
+      if (activeConversationSuggestion !== active || active.selectedIndex === index) return;
+      active.selectedIndex = index;
+      renderConversationSuggestions();
+    });
+    return option;
+  });
+  target.suggestionList.replaceChildren(...options);
+  const selected = active.suggestions[active.selectedIndex];
+  if (selected) {
+    target.input.setAttribute(
+      'aria-activedescendant',
+      `conversation-suggestion-${selected.id}`
+    );
+    target.suggestionStatus.textContent =
+      `${active.suggestions.length} ${active.trigger.kind === 'file' ? 'file' : 'Skill'} suggestions. ` +
+      `${selected.name}, ${active.selectedIndex + 1} of ${active.suggestions.length} selected.`;
+  }
+}
+
+function closeConversationSuggestions(notifyHost: boolean): void {
+  clearConversationSuggestionTimer();
+  const active = activeConversationSuggestion;
+  activeConversationSuggestion = undefined;
+  renderConversationSuggestions();
+  if (
+    notifyHost &&
+    active &&
+    conversationSessionId &&
+    conversationThreadId
+  ) {
+    vscode.postMessage({
+      type: 'threads/conversation/suggestion/clear',
+      sessionId: conversationSessionId,
+      threadId: conversationThreadId,
+      requestId: active.requestId
+    });
+  }
+}
+
+function clearConversationSuggestionTimer(): void {
+  if (conversationSuggestionTimer !== undefined) {
+    clearTimeout(conversationSuggestionTimer);
+    conversationSuggestionTimer = undefined;
+  }
 }
 
 function stopConversation(): void {
@@ -1380,10 +1802,22 @@ function updateConversationComposer(): void {
   const hasState = Boolean(conversationScreenState && conversationSessionId);
   const unavailable = execution?.kind === 'unavailable';
   const waitingForInput = Boolean(conversationScreenState?.interactions.length);
+  if (
+    activeConversationSuggestion &&
+    (
+      execution?.kind !== 'idle' ||
+      waitingForInput ||
+      pendingConversationSend
+    )
+  ) {
+    closeConversationSuggestions(true);
+  }
   renderRuntimeSettings(target);
   renderConversationAdditions(target);
   target.input.disabled = !hasState || unavailable || waitingForInput;
-  target.input.readOnly = Boolean(pendingConversationSend);
+  target.input.readOnly = Boolean(
+    pendingConversationSend || pendingConversationSuggestionSelection
+  );
   const canSend = Boolean(
     execution?.kind === 'idle' && !waitingForInput &&
     !pendingConversationSend &&
@@ -1802,6 +2236,7 @@ function runtimePermissionPreset(
 function toggleAddMenu(): void {
   const target = conversationComposerTarget;
   if (!target || target.add.disabled) return;
+  closeConversationSuggestions(true);
   target.addMenu.hidden = !target.addMenu.hidden;
   target.add.setAttribute('aria-expanded', String(!target.addMenu.hidden));
   if (!target.addMenu.hidden) {
@@ -1829,6 +2264,7 @@ function toggleUsagePanel(): void {
   const target = conversationComposerTarget;
   if (!target) return;
   if (!target.usagePanel.hidden) { closeUsagePanel(false); return; }
+  closeConversationSuggestions(true);
   target.settings.open = false;
   closeAddMenu(false);
   target.usagePanel.hidden = false;
@@ -2151,7 +2587,7 @@ function requireConversationTarget(): ConversationRenderTarget {
 function actionButton(
   label: string,
   action: ThreadListAction | 'new' | 'open' | 'back' | 'reload' | 'send' | 'stop' | 'add' |
-    'add-image' | 'add-mention' | 'add-skill' | 'remove-attachment' |
+    'add-image' | 'add-mention' | 'add-skill' | 'remove-attachment' | 'select-suggestion' |
     'bookmark-toggle' | 'latest' | 'usage' |
     'interaction-accept' | 'interaction-session' | 'interaction-decline' | 'interaction-cancel',
   threadId?: string
