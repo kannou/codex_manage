@@ -1,5 +1,7 @@
 # Codex Thread Manager
 
+[English](README.md) | [日本語](README.ja.md)
+
 Codex Thread Manager is a VS Code extension for organizing Codex threads associated with the current workspace.
 
 The MVP is packaged for private VSIX installation. Marketplace publication is not currently planned.

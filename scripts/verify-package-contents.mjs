@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const requiredFiles = [
+  'README.ja.md',
   'dist/extension.js',
   'dist/webview/conversation.js',
   'dist/webview/conversation.css',
@@ -36,4 +37,4 @@ if (missingFiles.length > 0) {
   throw new Error(`Required VSIX files are missing:\n${missingFiles.join('\n')}`);
 }
 
-console.log(`Verified ${requiredFiles.length} required VSIX runtime assets.`);
+console.log(`Verified ${requiredFiles.length} required VSIX assets.`);
