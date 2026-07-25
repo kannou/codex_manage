@@ -83,7 +83,8 @@ export function activate(context: vscode.ExtensionContext): void {
       startTurn: (params) => (activeClient ?? replaceClient()).startTurn(params),
       interruptTurn: (params) => (activeClient ?? replaceClient()).interruptTurn(params),
       listModels: (params) => (activeClient ?? replaceClient()).listModels(params),
-      listSkills: (params) => (activeClient ?? replaceClient()).listSkills(params)
+      listSkills: (params) => (activeClient ?? replaceClient()).listSkills(params),
+      fuzzyFileSearch: (params) => (activeClient ?? replaceClient()).fuzzyFileSearch(params)
     },
     startThread: (params) => (activeClient ?? replaceClient()).startThread(params),
     readConversationConfig: (cwd) => (activeClient ?? replaceClient()).readConversationConfig({ cwd }),

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -562,6 +562,289 @@ test('adds host-selected file references and Skills and restores them after a fa
     transition.state.attachments.map(({ kind, name }) => ({ kind, name })),
     [{ kind: 'mention', name: 'AGENTS.md' }, { kind: 'skill', name: 'review' }]
   );
+});
+
+test('searches and selects correlated file and Skill suggestions without accepting stale results', async (t) => {
+  const workspaceDirectory = mkdtempSync(join(tmpdir(), 'codex-thread-suggestions-'));
+  const sourceDirectory = join(workspaceDirectory, 'src');
+  const filePath = join(sourceDirectory, 'main.ts');
+  const skillPath = join(workspaceDirectory, 'review-SKILL.md');
+  mkdirSync(sourceDirectory);
+  writeFileSync(filePath, 'export const value = 1;\n');
+  writeFileSync(skillPath, '# Review\n');
+  t.after(() => rmSync(workspaceDirectory, { recursive: true, force: true }));
+  (vscode.workspace as unknown as {
+    workspaceFolders: Array<{ uri: { fsPath: string }; name: string }>;
+  }).workspaceFolders = [{
+    uri: { fsPath: workspaceDirectory },
+    name: 'workspace'
+  }];
+
+  const oldSearch = deferred<{
+    files: Array<{
+      root: string;
+      path: string;
+      match_type: 'file';
+      file_name: string;
+      score: number;
+      indices: null;
+    }>;
+  }>();
+  const turnStarts: unknown[] = [];
+  const client: ConversationSessionClient = {
+    readThread: async (params) => ({
+      thread: createThread({ id: params.threadId, cwd: workspaceDirectory })
+    }),
+    resumeThread: async (params) => resumeResponse(createThread({
+      id: params.threadId,
+      cwd: workspaceDirectory
+    })),
+    startTurn: async (params) => {
+      turnStarts.push(params);
+      return { turn: createTurn({ id: 'turn-suggestions' }) };
+    },
+    interruptTurn: async () => ({}),
+    listModels: async () => ({ data: [], nextCursor: null }),
+    fuzzyFileSearch: async (params) => {
+      if (params.query === 'old') return oldSearch.promise;
+      return {
+        files: [
+          {
+            root: workspaceDirectory,
+            path: 'src/main.ts',
+            match_type: 'file',
+            file_name: 'main.ts',
+            score: 100,
+            indices: null
+          },
+          {
+            root: workspaceDirectory,
+            path: '../outside.ts',
+            match_type: 'file',
+            file_name: 'outside.ts',
+            score: 90,
+            indices: null
+          },
+          {
+            root: workspaceDirectory,
+            path: 'src',
+            match_type: 'directory',
+            file_name: 'src',
+            score: 80,
+            indices: null
+          }
+        ]
+      };
+    },
+    listSkills: async () => ({
+      data: [{
+        cwd: workspaceDirectory,
+        skills: [
+          {
+            name: 'review',
+            description: 'Review changes',
+            path: skillPath,
+            scope: 'repo',
+            enabled: true
+          },
+          {
+            name: 'disabled',
+            description: 'Must stay hidden',
+            path: skillPath,
+            scope: 'repo',
+            enabled: false
+          }
+        ],
+        errors: []
+      }]
+    })
+  };
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: client,
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  provider.setConnectionStatus({ kind: 'ready' });
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  const loaded = view.webview.postedMessages.find((message) =>
+    (message as { type?: unknown }).type === 'threads/conversationLoaded'
+  ) as { state: { sessionId: string } };
+  const sessionId = loaded.state.sessionId;
+
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/search',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-old',
+    kind: 'file',
+    query: 'old'
+  });
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/search',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-new',
+    kind: 'file',
+    query: 'main'
+  });
+  await flushPromises();
+  const fileSuggestions = view.webview.postedMessages.find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type === 'threads/conversationSuggestions' &&
+    (message as { requestId?: unknown }).requestId === 'file-new'
+  ) as {
+    suggestions: Array<{ id: string; kind: string; name: string; path: string }>;
+  };
+  assert.deepEqual(
+    fileSuggestions.suggestions.map(({ kind, name, path }) => ({ kind, name, path })),
+    [{ kind: 'file', name: 'main.ts', path: 'src/main.ts' }]
+  );
+
+  oldSearch.resolve({
+    files: [{
+      root: workspaceDirectory,
+      path: 'old.ts',
+      match_type: 'file',
+      file_name: 'old.ts',
+      score: 1,
+      indices: null
+    }]
+  });
+  await flushPromises();
+  assert.equal(view.webview.postedMessages.some((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type === 'threads/conversationSuggestions' &&
+    (message as { requestId?: unknown }).requestId === 'file-old'
+  ), false);
+
+  const fileSuggestionId = fileSuggestions.suggestions[0]?.id;
+  assert.ok(fileSuggestionId);
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/select',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-new',
+    suggestionId: fileSuggestionId
+  });
+  await flushPromises();
+  await flushPromises();
+  assert.equal(view.webview.postedMessages.some((message) =>
+    (message as { type?: unknown; outcome?: unknown; suggestionId?: unknown }).type ===
+      'threads/conversationSuggestionSelection' &&
+    (message as { outcome?: unknown }).outcome === 'accepted' &&
+    (message as { suggestionId?: unknown }).suggestionId === fileSuggestionId
+  ), true);
+
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/search',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'skill-new',
+    kind: 'skill',
+    query: 'rev'
+  });
+  await flushPromises();
+  const skillSuggestions = view.webview.postedMessages.find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type === 'threads/conversationSuggestions' &&
+    (message as { requestId?: unknown }).requestId === 'skill-new'
+  ) as {
+    suggestions: Array<{ id: string; kind: string; name: string; description: string }>;
+  };
+  assert.deepEqual(
+    skillSuggestions.suggestions.map(({ kind, name, description }) => ({ kind, name, description })),
+    [{ kind: 'skill', name: 'review', description: 'Review changes' }]
+  );
+  const skillSuggestionId = skillSuggestions.suggestions[0]?.id;
+  assert.ok(skillSuggestionId);
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/select',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'skill-new',
+    suggestionId: skillSuggestionId
+  });
+  await flushPromises();
+
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/select',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-new',
+    suggestionId: fileSuggestionId
+  });
+  await flushPromises();
+  const staleSelection = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type ===
+      'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-new'
+  ) as { outcome: string };
+  assert.equal(staleSelection.outcome, 'rejected');
+
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/search',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-duplicate',
+    kind: 'file',
+    query: 'main'
+  });
+  await flushPromises();
+  const duplicateSuggestions = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type === 'threads/conversationSuggestions' &&
+    (message as { requestId?: unknown }).requestId === 'file-duplicate'
+  ) as { suggestions: Array<{ id: string }> };
+  const duplicateSuggestionId = duplicateSuggestions.suggestions[0]?.id;
+  assert.ok(duplicateSuggestionId);
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/select',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-duplicate',
+    suggestionId: duplicateSuggestionId
+  });
+  await flushPromises();
+  await flushPromises();
+  assert.equal(view.webview.postedMessages.some((message) =>
+    (message as { type?: unknown; requestId?: unknown; outcome?: unknown }).type ===
+      'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-duplicate' &&
+    (message as { outcome?: unknown }).outcome === 'accepted'
+  ), true);
+  const afterDuplicate = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { state?: { attachments?: unknown[] } }).state?.attachments?.length === 2
+  ) as { state: { attachments: Array<{ kind: string; name: string }> } };
+  assert.deepEqual(
+    afterDuplicate.state.attachments.map(({ kind, name }) => ({ kind, name })),
+    [{ kind: 'mention', name: 'main.ts' }, { kind: 'skill', name: 'review' }]
+  );
+
+  view.webview.fire({
+    type: 'threads/conversation/send',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'send-suggestions',
+    text: 'Use both suggestions'
+  });
+  await flushPromises();
+  assert.deepEqual((turnStarts[0] as { input: unknown }).input, [
+    { type: 'text', text: 'Use both suggestions', text_elements: [] },
+    {
+      type: 'text',
+      text: `Referenced file: ${filePath}`,
+      text_elements: [{
+        byteRange: {
+          start: 17,
+          end: Buffer.byteLength(`Referenced file: ${filePath}`, 'utf8')
+        },
+        placeholder: '@main.ts'
+      }]
+    },
+    { type: 'skill', name: 'review', path: skillPath }
+  ]);
 });
 
 test('restores isolated per-thread drafts and clears them only after an accepted send', async (t) => {

@@ -686,6 +686,75 @@ button.conversation-attachment-remove:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
 }
 
+.conversation-suggestion-panel {
+  max-height: min(260px, 40vh);
+  margin: 0 0 6px;
+  overflow-y: auto;
+  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+  background: var(--vscode-editorSuggestWidget-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-widget-border));
+  border-radius: 4px;
+  box-shadow: 0 3px 10px var(--vscode-widget-shadow);
+}
+
+.conversation-suggestion-list {
+  display: grid;
+  padding: 3px;
+}
+
+button.conversation-suggestion {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  gap: 2px;
+  padding: 6px 7px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+}
+
+button.conversation-suggestion:hover,
+button.conversation-suggestion.is-selected {
+  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-list-activeSelectionForeground));
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground));
+}
+
+button.conversation-suggestion:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.conversation-suggestion-name,
+.conversation-suggestion-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-suggestion-name {
+  font-size: 0.82rem;
+}
+
+.conversation-suggestion-detail {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.72rem;
+}
+
+button.conversation-suggestion.is-selected .conversation-suggestion-detail {
+  color: inherit;
+  opacity: 0.82;
+}
+
+.conversation-suggestion-message {
+  margin: 0;
+  padding: 7px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.78rem;
+}
+
 .conversation-runtime-settings { position: relative; min-width: 0; text-align: right; }
 .conversation-runtime-settings.is-unavailable { opacity: 0.7; }
 
@@ -942,6 +1011,7 @@ button.conversation-stop.is-disabled {
   input,
   select,
   .conversation-add-menu,
+  .conversation-suggestion-panel,
   .conversation-runtime-menu,
   .conversation-composer-input {
     border-color: CanvasText;

@@ -10,6 +10,7 @@ import type { ApprovalsReviewer } from './generated/v2/ApprovalsReviewer';
 import type { SandboxMode } from './generated/v2/SandboxMode';
 import type { ModelListResponse } from './generated/v2/ModelListResponse';
 import type { SkillsListResponse } from './generated/v2/SkillsListResponse';
+import type { FuzzyFileSearchResponse } from './generated/FuzzyFileSearchResponse';
 import type { ThreadItem } from './generated/v2/ThreadItem';
 import type { ThreadStatus } from './generated/v2/ThreadStatus';
 import type { Turn } from './generated/v2/Turn';
@@ -302,6 +303,36 @@ export function parseSkillsListResponse(
     throw new Error('App Server returned an invalid skills/list response.');
   }
   return value as SkillsListResponse;
+}
+
+export function parseFuzzyFileSearchResponse(
+  value: unknown,
+  requestedRoots: readonly string[]
+): FuzzyFileSearchResponse {
+  if (
+    !isJsonObject(value) ||
+    !Array.isArray(value.files) ||
+    !value.files.every((file) => (
+      isJsonObject(file) &&
+      typeof file.root === 'string' &&
+      requestedRoots.includes(file.root) &&
+      typeof file.path === 'string' &&
+      typeof file.file_name === 'string' &&
+      isOneOf(file.match_type, ['file', 'directory']) &&
+      typeof file.score === 'number' &&
+      Number.isFinite(file.score) &&
+      (
+        file.indices === null ||
+        (
+          Array.isArray(file.indices) &&
+          file.indices.every((index) => Number.isSafeInteger(index) && Number(index) >= 0)
+        )
+      )
+    ))
+  ) {
+    throw new Error('App Server returned an invalid fuzzyFileSearch response.');
+  }
+  return value as FuzzyFileSearchResponse;
 }
 
 export function parseConversationNotification(

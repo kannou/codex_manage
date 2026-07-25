@@ -16,6 +16,8 @@ import type {
 export const MAX_COMPOSER_TEXT_LENGTH = 100_000;
 export const MAX_CONVERSATION_ID_LENGTH = 512;
 export const MAX_THREAD_NAME_LENGTH = 512;
+export const MAX_SUGGESTION_QUERY_LENGTH = 200;
+export const MAX_CONVERSATION_SUGGESTIONS = 20;
 
 export type ThreadListAction =
   | 'loadMoreActive'
@@ -95,6 +97,19 @@ export interface UsageSnapshot {
 export interface UsageWindow { readonly remainingPercent: number; readonly resetsAt: number | null }
 
 export type ConversationAdditionKind = 'localImage' | 'mention' | 'skill';
+export type ConversationSuggestionKind = 'file' | 'skill';
+
+export type ConversationSuggestionViewModel = {
+  readonly id: string;
+  readonly kind: 'file';
+  readonly name: string;
+  readonly path: string;
+} | {
+  readonly id: string;
+  readonly kind: 'skill';
+  readonly name: string;
+  readonly description: string;
+};
 
 export type ConversationAttachmentViewModel = {
   readonly id: string;
@@ -193,6 +208,27 @@ export type ThreadsWebviewToHostMessage =
     readonly sessionId: string;
     readonly threadId: string;
     readonly attachmentId: string;
+  }
+  | {
+    readonly type: 'threads/conversation/suggestion/search';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly requestId: string;
+    readonly kind: ConversationSuggestionKind;
+    readonly query: string;
+  }
+  | {
+    readonly type: 'threads/conversation/suggestion/select';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly requestId: string;
+    readonly suggestionId: string;
+  }
+  | {
+    readonly type: 'threads/conversation/suggestion/clear';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly requestId: string;
   }
   | {
     readonly type: 'threads/conversation/interaction';
@@ -294,6 +330,24 @@ export type ThreadsHostToWebviewMessage =
     readonly turnId: string;
     readonly itemId: string;
     readonly codeBlockIndex?: number;
+    readonly outcome: 'accepted' | 'rejected';
+  }
+  | {
+    readonly type: 'threads/conversationSuggestions';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly requestId: string;
+    readonly kind: ConversationSuggestionKind;
+    readonly query: string;
+    readonly outcome: 'ready' | 'unavailable';
+    readonly suggestions: readonly ConversationSuggestionViewModel[];
+  }
+  | {
+    readonly type: 'threads/conversationSuggestionSelection';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly requestId: string;
+    readonly suggestionId: string;
     readonly outcome: 'accepted' | 'rejected';
   }
   | ConversationOperationResult;
@@ -432,6 +486,35 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       isBoundedId(value.attachmentId)
     );
   }
+  if (value.type === 'threads/conversation/suggestion/search') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'requestId', 'kind', 'query']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      isBoundedId(value.requestId) &&
+      (value.kind === 'file' || value.kind === 'skill') &&
+      typeof value.query === 'string' &&
+      value.query.length <= MAX_SUGGESTION_QUERY_LENGTH &&
+      !/\s/u.test(value.query)
+    );
+  }
+  if (value.type === 'threads/conversation/suggestion/select') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'requestId', 'suggestionId']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      isBoundedId(value.requestId) &&
+      isBoundedId(value.suggestionId)
+    );
+  }
+  if (value.type === 'threads/conversation/suggestion/clear') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'requestId']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      isBoundedId(value.requestId)
+    );
+  }
   if (value.type === 'threads/conversation/interaction') {
     return (
       hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'interactionId', 'reply']) &&
@@ -520,9 +603,68 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
         (value.outcome === 'accepted' || value.outcome === 'rejected') &&
         (value.codeBlockIndex === undefined ||
           (Number.isInteger(value.codeBlockIndex) && Number(value.codeBlockIndex) >= 0));
+    case 'threads/conversationSuggestions':
+      return (
+        hasOnlyKeys(value, [
+          'type', 'sessionId', 'threadId', 'requestId', 'kind', 'query', 'outcome', 'suggestions'
+        ]) &&
+        isBoundedId(value.sessionId) &&
+        isBoundedId(value.threadId) &&
+        isBoundedId(value.requestId) &&
+        (value.kind === 'file' || value.kind === 'skill') &&
+        typeof value.query === 'string' &&
+        value.query.length <= MAX_SUGGESTION_QUERY_LENGTH &&
+        !/\s/u.test(value.query) &&
+        (value.outcome === 'ready' || value.outcome === 'unavailable') &&
+        Array.isArray(value.suggestions) &&
+        value.suggestions.length <= MAX_CONVERSATION_SUGGESTIONS &&
+        value.suggestions.every((suggestion) =>
+          isConversationSuggestion(suggestion, value.kind as ConversationSuggestionKind)
+        )
+      );
+    case 'threads/conversationSuggestionSelection':
+      return (
+        hasOnlyKeys(value, [
+          'type', 'sessionId', 'threadId', 'requestId', 'suggestionId', 'outcome'
+        ]) &&
+        isBoundedId(value.sessionId) &&
+        isBoundedId(value.threadId) &&
+        isBoundedId(value.requestId) &&
+        isBoundedId(value.suggestionId) &&
+        (value.outcome === 'accepted' || value.outcome === 'rejected')
+      );
     default:
       return false;
   }
+}
+
+function isConversationSuggestion(
+  value: unknown,
+  expectedKind: ConversationSuggestionKind
+): value is ConversationSuggestionViewModel {
+  if (!isObject(value) || !isBoundedId(value.id) || value.kind !== expectedKind) {
+    return false;
+  }
+  if (
+    typeof value.name !== 'string' ||
+    !value.name ||
+    value.name.length > 255
+  ) {
+    return false;
+  }
+  if (value.kind === 'file') {
+    return (
+      hasOnlyKeys(value, ['id', 'kind', 'name', 'path']) &&
+      typeof value.path === 'string' &&
+      Boolean(value.path) &&
+      value.path.length <= 2_000
+    );
+  }
+  return (
+    hasOnlyKeys(value, ['id', 'kind', 'name', 'description']) &&
+    typeof value.description === 'string' &&
+    value.description.length <= 2_000
+  );
 }
 
 function isUsageSnapshot(value: unknown): boolean {

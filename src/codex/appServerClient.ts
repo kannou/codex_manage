@@ -37,6 +37,7 @@ import {
   isRequestId,
   parseInitializeResponse,
   parseConversationConfigDefaults,
+  parseFuzzyFileSearchResponse,
   parseModelListResponse,
   parseAccountRateLimitsResponse,
   parseSkillsListResponse,
@@ -53,6 +54,8 @@ import type { ModelListResponse } from './protocol/generated/v2/ModelListRespons
 import type { SkillsListParams } from './protocol/generated/v2/SkillsListParams';
 import type { SkillsListResponse } from './protocol/generated/v2/SkillsListResponse';
 import type { GetAccountRateLimitsResponse } from './protocol/generated/v2/GetAccountRateLimitsResponse';
+import type { FuzzyFileSearchParams } from './protocol/generated/FuzzyFileSearchParams';
+import type { FuzzyFileSearchResponse } from './protocol/generated/FuzzyFileSearchResponse';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const SERVER_REQUEST_NOT_SUPPORTED = -32601;
@@ -293,6 +296,16 @@ export class AppServerClient {
       return parseSkillsListResponse(result, params.cwds);
     } catch (error) {
       throw this.classifyRequiredProtocolError(error, 'skills/list failed.');
+    }
+  }
+
+  public async fuzzyFileSearch(params: FuzzyFileSearchParams): Promise<FuzzyFileSearchResponse> {
+    await this.connect();
+    try {
+      const result = await this.sendRequest((id) => ({ method: 'fuzzyFileSearch', id, params }));
+      return parseFuzzyFileSearchResponse(result, params.roots);
+    } catch (error) {
+      throw this.classifyRequiredProtocolError(error, 'fuzzyFileSearch failed.');
     }
   }
 

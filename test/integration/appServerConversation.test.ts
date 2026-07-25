@@ -149,6 +149,12 @@ test('lists Skills, starts a turn with every supported context input, streams, a
   assert.equal(resumed.model, 'gpt-fixture');
   const skills = await client.listSkills({ cwds: ['/workspace'], forceReload: false });
   assert.equal(skills.data[0]?.skills[0]?.name, 'review');
+  const files = await client.fuzzyFileSearch({
+    query: 'agent',
+    roots: ['/workspace'],
+    cancellationToken: null
+  });
+  assert.equal(files.files[0]?.path, 'AGENTS.md');
 
   const userItemCompleted = waitForConversationNotification(
     client,

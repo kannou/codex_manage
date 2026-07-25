@@ -103,6 +103,28 @@ lines.on('line', (line) => {
         }
       });
     }
+  } else if (message.method === 'fuzzyFileSearch' && mode === 'conversation-live') {
+    if (
+      message.params?.query !== 'agent' ||
+      JSON.stringify(message.params?.roots) !== JSON.stringify(['/workspace']) ||
+      message.params?.cancellationToken !== null
+    ) {
+      send({ id: message.id, error: { code: -32602, message: 'Expected workspace file query' } });
+    } else {
+      send({
+        id: message.id,
+        result: {
+          files: [{
+            root: '/workspace',
+            path: 'AGENTS.md',
+            match_type: 'file',
+            file_name: 'AGENTS.md',
+            score: 100,
+            indices: [0, 1]
+          }]
+        }
+      });
+    }
   } else if (message.method === 'thread/resume' && mode === 'conversation-live') {
     if (message.params?.threadId !== 'thread-1') {
       send({ id: message.id, error: { code: -32602, message: 'Expected thread-1' } });
