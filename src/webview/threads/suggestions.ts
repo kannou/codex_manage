@@ -16,6 +16,17 @@ export interface AppliedComposerSuggestion {
   readonly caret: number;
 }
 
+export function suggestionScrollDelta(
+  viewportTop: number,
+  viewportBottom: number,
+  itemTop: number,
+  itemBottom: number
+): number {
+  if (itemTop < viewportTop) return itemTop - viewportTop;
+  if (itemBottom > viewportBottom) return itemBottom - viewportBottom;
+  return 0;
+}
+
 export function findComposerSuggestionTrigger(
   text: string,
   selectionStart: number,

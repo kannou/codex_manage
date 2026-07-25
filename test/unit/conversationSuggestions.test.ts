@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyComposerSuggestion,
-  findComposerSuggestionTrigger
+  findComposerSuggestionTrigger,
+  suggestionScrollDelta
 } from '../../src/webview/threads/suggestions';
 
 test('finds file and Skill triggers at the start or a word boundary', () => {
@@ -54,4 +55,10 @@ test('removes only the selected trigger and preserves surrounding plain text', (
     applyComposerSuggestion('Check @source please', trigger),
     undefined
   );
+});
+
+test('scrolls only when the selected suggestion leaves the visible candidate area', () => {
+  assert.equal(suggestionScrollDelta(100, 300, 120, 160), 0);
+  assert.equal(suggestionScrollDelta(100, 300, 70, 110), -30);
+  assert.equal(suggestionScrollDelta(100, 300, 280, 340), 40);
 });

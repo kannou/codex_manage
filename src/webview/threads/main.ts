@@ -38,6 +38,7 @@ import { conversationActivityPresentation } from './conversationActivity';
 import {
   applyComposerSuggestion,
   findComposerSuggestionTrigger,
+  suggestionScrollDelta,
   type ComposerSuggestionTrigger
 } from './suggestions';
 
@@ -1686,6 +1687,7 @@ function renderConversationSuggestions(): void {
   });
   target.suggestionList.replaceChildren(...options);
   const selected = active.suggestions[active.selectedIndex];
+  const selectedOption = options[active.selectedIndex];
   if (selected) {
     target.input.setAttribute(
       'aria-activedescendant',
@@ -1694,6 +1696,18 @@ function renderConversationSuggestions(): void {
     target.suggestionStatus.textContent =
       `${active.suggestions.length} ${active.trigger.kind === 'file' ? 'file' : 'Skill'} suggestions. ` +
       `${selected.name}, ${active.selectedIndex + 1} of ${active.suggestions.length} selected.`;
+  }
+  if (selectedOption) {
+    const panelBounds = target.suggestionPanel.getBoundingClientRect();
+    const optionBounds = selectedOption.getBoundingClientRect();
+    const viewportTop = panelBounds.top + target.suggestionPanel.clientTop;
+    const delta = suggestionScrollDelta(
+      viewportTop,
+      viewportTop + target.suggestionPanel.clientHeight,
+      optionBounds.top,
+      optionBounds.bottom
+    );
+    if (delta !== 0) target.suggestionPanel.scrollTop += delta;
   }
 }
 
