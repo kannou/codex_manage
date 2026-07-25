@@ -12,7 +12,10 @@ import type { Turn } from '../../src/codex/protocol/generated/v2/Turn';
 import type { ThreadItem } from '../../src/codex/protocol/generated/v2/ThreadItem';
 import type { ThreadDisplayModel, ThreadRepositorySnapshot } from '../../src/codex/threadRepository';
 import type { ConversationSessionClient } from '../../src/conversation/conversationSession';
-import { ThreadListWebviewProvider } from '../../src/views/threadListWebviewProvider';
+import {
+  calculateContextWindowUsage,
+  ThreadListWebviewProvider
+} from '../../src/views/threadListWebviewProvider';
 import { createThread, createTurn } from '../support/threadFixture';
 
 type Listener<T> = (event: T) => unknown;
@@ -98,6 +101,41 @@ function deferred<T>(): Deferred<T> {
   });
   return { promise, resolve: (value) => resolvePromise?.(value) };
 }
+
+test('calculates context remaining from the active request and recovers after compaction', () => {
+  const breakdown = (totalTokens: number) => ({
+    totalTokens,
+    inputTokens: totalTokens,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0
+  });
+  const total = breakdown(16_322_975);
+
+  assert.deepEqual(calculateContextWindowUsage({
+    total,
+    last: breakdown(229_793),
+    modelContextWindow: 258_400
+  }), {
+    remainingPercent: 12,
+    remainingTokens: 28_607,
+    usableTokens: 246_400
+  });
+  assert.deepEqual(calculateContextWindowUsage({
+    total,
+    last: breakdown(9_919),
+    modelContextWindow: 258_400
+  }), {
+    remainingPercent: 100,
+    remainingTokens: 246_400,
+    usableTokens: 246_400
+  });
+  assert.equal(calculateContextWindowUsage({
+    total,
+    last: breakdown(9_919),
+    modelContextWindow: null
+  }), null);
+});
 
 function displayThread(id: string, title: string, overrides: Partial<ThreadDisplayModel> = {}): ThreadDisplayModel {
   const date = new Date('2026-07-17T00:00:00Z');

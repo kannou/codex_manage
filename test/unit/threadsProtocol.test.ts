@@ -60,7 +60,12 @@ const conversationState = {
     { id: 'attachment-3', kind: 'skill', name: 'review', description: 'Review changes' }
   ],
   interactions: [],
-  bookmarkedTurnIds: ['turn-1']
+  bookmarkedTurnIds: ['turn-1'],
+  contextWindow: {
+    remainingPercent: 12,
+    remainingTokens: 28_607,
+    usableTokens: 246_400
+  }
 } as const;
 
 test('accepts only the explicit sidebar navigation messages', () => {
@@ -468,6 +473,30 @@ test('validates persisted navigation state and host messages', () => {
       execution: { kind: 'idle' }
     }
   }), true);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: {
+      ...conversationState,
+      revision: 2,
+      contextWindow: {
+        remainingPercent: 12,
+        remainingTokens: 246_401,
+        usableTokens: 246_400
+      }
+    }
+  }), false);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationState',
+    state: {
+      ...conversationState,
+      revision: 2,
+      contextWindow: {
+        remainingPercent: 99,
+        remainingTokens: 28_607,
+        usableTokens: 246_400
+      }
+    }
+  }), false);
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',
     state: {

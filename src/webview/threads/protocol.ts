@@ -73,6 +73,12 @@ export type ConversationExecutionViewModel =
   | { readonly kind: 'stopping'; readonly turnId: string }
   | { readonly kind: 'unavailable'; readonly message: string };
 
+export interface ConversationContextWindowViewModel {
+  readonly remainingPercent: number;
+  readonly remainingTokens: number;
+  readonly usableTokens: number;
+}
+
 export interface ConversationScreenState {
   readonly sessionId: string;
   readonly revision: number;
@@ -84,7 +90,7 @@ export interface ConversationScreenState {
   readonly attachments: readonly ConversationAttachmentViewModel[];
   readonly interactions: readonly ConversationInteractionViewModel[];
   readonly bookmarkedTurnIds: readonly string[];
-  readonly contextWindowRemainingPercent?: number | null;
+  readonly contextWindow?: ConversationContextWindowViewModel | null;
   readonly notice?: string;
 }
 
@@ -679,8 +685,25 @@ function isUsageWindow(value: unknown): boolean {
   return value === null || (isObject(value) && isPercent(value.remainingPercent) &&
     (value.resetsAt === null || typeof value.resetsAt === 'number'));
 }
-function isPercent(value: unknown): boolean {
+function isPercent(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+function isContextWindow(value: unknown): value is ConversationContextWindowViewModel {
+  if (!isObject(value)) return false;
+  const remainingTokens = value.remainingTokens;
+  const usableTokens = value.usableTokens;
+  return (
+    isPercent(value.remainingPercent) &&
+    typeof remainingTokens === 'number' &&
+    Number.isSafeInteger(remainingTokens) &&
+    remainingTokens >= 0 &&
+    typeof usableTokens === 'number' &&
+    Number.isSafeInteger(usableTokens) &&
+    usableTokens > 0 &&
+    remainingTokens <= usableTokens &&
+    Math.round(remainingTokens / usableTokens * 100) === value.remainingPercent
+  );
 }
 
 export function isConversationScreenState(value: unknown): value is ConversationScreenState {
@@ -706,8 +729,8 @@ export function isConversationScreenState(value: unknown): value is Conversation
     value.attachments.every(isConversationAttachment) &&
     Array.isArray(value.interactions) && value.interactions.every(isConversationInteraction) &&
     isBookmarkedTurnIds(value.bookmarkedTurnIds, value.model) &&
-    (value.contextWindowRemainingPercent === undefined || value.contextWindowRemainingPercent === null ||
-      isPercent(value.contextWindowRemainingPercent)) &&
+    (value.contextWindow === undefined || value.contextWindow === null ||
+      isContextWindow(value.contextWindow)) &&
     (value.notice === undefined || typeof value.notice === 'string')
   );
 }
