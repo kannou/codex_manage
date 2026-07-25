@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 - 2026-07-25
+
+- Fixed duplicate Runtime model choices when the App Server catalog and current unlisted model resolve to the same visible label.
 
 - Added persistent turn bookmarks with a sticky, preview-labelled jump menu, accessible turn controls, and compact Back/Reload icons in the conversation header.
 
