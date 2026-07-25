@@ -3,6 +3,7 @@ import type {
   ConversationTurnViewModel,
   ConversationViewModel
 } from '../../conversation/conversationViewModel';
+import { formatTurnDuration } from './duration';
 import { renderMarkdown } from './markdown';
 
 export interface ConversationRenderTarget {
@@ -604,8 +605,9 @@ function turnMetadata(turn: ConversationTurnViewModel): string {
   if (turn.startedAt !== null) {
     values.push(formatDate(turn.startedAt));
   }
-  if (turn.durationMs !== null) {
-    values.push(`${turn.durationMs.toLocaleString()} ms`);
+  const duration = formatTurnDuration(turn.durationMs);
+  if (duration !== null) {
+    values.push(duration);
   }
   if (turn.itemsView !== 'full') {
     values.push(`${turn.itemsView} history`);
