@@ -95,6 +95,9 @@ export function activate(context: vscode.ExtensionContext): void {
         speed: configuration.get<'standard' | 'fast'>('defaultSpeed', 'standard')
       };
     },
+    readReduceMotion: () => vscode.workspace
+      .getConfiguration('workbench')
+      .get<'auto' | 'on' | 'off'>('reduceMotion', 'auto'),
     onConversationCreated: (thread) => {
       repository?.upsertThread(thread);
       if (repository) provider.setSnapshot(repository.snapshot());
@@ -221,6 +224,9 @@ export function activate(context: vscode.ExtensionContext): void {
       void requestThreadRefresh(false);
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('workbench.reduceMotion')) {
+        provider.refreshReduceMotion();
+      }
       if (event.affectsConfiguration('codexThreadManager.codexPath')) {
         replaceClient();
       }

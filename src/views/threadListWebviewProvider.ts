@@ -46,6 +46,7 @@ import {
   type ConversationScreenState,
   type ThreadListAction,
   type ThreadListPageViewModel,
+  type ReduceMotionPreference,
   type ThreadListSnapshotViewModel,
   type ThreadsHostToWebviewMessage
 } from '../webview/threads/protocol';
@@ -77,6 +78,7 @@ export interface ThreadListWebviewProviderOptions {
   readonly readConversationConfig?: (cwd: string) => Promise<ConversationConfigDefaults>;
   readonly readAccountRateLimits?: () => Promise<GetAccountRateLimitsResponse>;
   readonly readNewConversationDefaults?: () => NewConversationDefaults;
+  readonly readReduceMotion?: () => ReduceMotionPreference;
   readonly onConversationCreated?: (thread: Thread) => void;
   readonly renameConversationThread?: (threadId: string, name: string) => Promise<void>;
   readonly onConversationScreenChange?: (open: boolean) => void;
@@ -410,6 +412,13 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     if (!this.resolvePendingRestore() && !this.activeThread && !this.newConversationDraft) {
       this.postListState();
     }
+  }
+
+  public refreshReduceMotion(): void {
+    this.post({
+      type: 'threads/reduceMotion',
+      preference: this.reduceMotionPreference()
+    });
   }
 
   private async copyConversationContent(
@@ -2052,11 +2061,15 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   <link rel="stylesheet" href="${escapeAttribute(style.toString())}">
   <title>Codex Threads</title>
 </head>
-<body>
+<body data-reduce-motion="${this.reduceMotionPreference()}">
   <main id="app" aria-live="polite" aria-busy="true">Loading threads…</main>
   <script nonce="${nonce}" src="${escapeAttribute(script.toString())}"></script>
 </body>
 </html>`;
+  }
+
+  private reduceMotionPreference(): ReduceMotionPreference {
+    return this.options.readReduceMotion?.() ?? 'auto';
   }
 
   private disposeViewListeners(): void {

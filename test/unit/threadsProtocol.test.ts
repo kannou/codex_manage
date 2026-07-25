@@ -336,6 +336,14 @@ test('validates persisted navigation state and host messages', () => {
 
   assert.equal(isThreadsHostMessage({ type: 'threads/showList' }), true);
   assert.equal(isThreadsHostMessage({
+    type: 'threads/reduceMotion',
+    preference: 'off'
+  }), true);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/reduceMotion',
+    preference: 'system'
+  }), false);
+  assert.equal(isThreadsHostMessage({
     type: 'threads/focusConversationPrompt',
     sessionId: 'session-1',
     threadId: 'thread-1'

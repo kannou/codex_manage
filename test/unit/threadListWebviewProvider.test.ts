@@ -217,9 +217,11 @@ function runtimeModel(): Model {
 test('posts a primitive-only list model and a secure Webview shell after ready', (t) => {
   setWorkspace();
   const logs: string[] = [];
+  let reduceMotion: 'auto' | 'on' | 'off' = 'off';
   const provider = new ThreadListWebviewProvider({
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async () => createThread()),
+    readReduceMotion: () => reduceMotion,
     logger: { appendLine: (value) => logs.push(value) }
   });
   t.after(() => provider.dispose());
@@ -235,8 +237,16 @@ test('posts a primitive-only list model and a secure Webview shell after ready',
   assert.equal(view.webview.options.enableCommandUris, false);
   assert.match(view.webview.html, /threads\.js/u);
   assert.match(view.webview.html, /threads\.css/u);
+  assert.match(view.webview.html, /data-reduce-motion="off"/u);
   assert.match(view.webview.html, /default-src 'none'/u);
   assert.equal(view.webview.html.includes('unsafe-inline'), false);
+
+  reduceMotion = 'on';
+  provider.refreshReduceMotion();
+  assert.deepEqual(view.webview.postedMessages.at(-1), {
+    type: 'threads/reduceMotion',
+    preference: 'on'
+  });
 
   const listState = view.webview.postedMessages.find(
     (message) => (message as { type?: unknown }).type === 'threads/listState'
