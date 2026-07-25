@@ -892,6 +892,9 @@ test('keeps a new-conversation draft unavailable across disconnect and reloads i
 test('opens history in the sidebar, keeps it during snapshot updates, and returns to the latest list', async (t) => {
   setWorkspace();
   const reads: string[] = [];
+  let refreshes = 0;
+  let messagesAtRefresh: unknown[] = [];
+  let view: FakeWebviewView;
   const provider = new ThreadListWebviewProvider({
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => {
@@ -902,13 +905,18 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
         turns: [createTurn()]
       });
     }),
+    onListRefreshRequested: () => {
+      refreshes += 1;
+      messagesAtRefresh = [...view.webview.postedMessages];
+    },
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
   provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
-  const view = new FakeWebviewView();
+  view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
+  assert.equal(refreshes, 0);
   view.webview.postedMessages.length = 0;
 
   view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
@@ -931,6 +939,11 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
     view.webview.postedMessages.map((message) => (message as { type?: unknown }).type),
     ['threads/showList', 'threads/listState']
   );
+  assert.deepEqual(
+    messagesAtRefresh.map((message) => (message as { type?: unknown }).type),
+    ['threads/showList', 'threads/listState']
+  );
+  assert.equal(refreshes, 1);
   assert.match(JSON.stringify(view.webview.postedMessages[1]), /Renamed while open/u);
 });
 

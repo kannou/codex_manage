@@ -7,6 +7,7 @@ import { build } from 'esbuild';
 const outputDirectory = await mkdtemp(join(tmpdir(), 'codex-thread-manager-tests-'));
 const entryPoints = [
   'test/unit/codexExecutableResolver.test.mjs',
+  'test/unit/coalescingTaskRunner.test.ts',
   'test/unit/dependencyDoctor.test.mjs',
   'test/unit/extensionManifest.test.mjs',
   'test/unit/fencedCode.test.ts',
