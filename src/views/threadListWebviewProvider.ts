@@ -16,6 +16,7 @@ import type { AskForApproval } from '../codex/protocol/generated/v2/AskForApprov
 import type { ApprovalsReviewer } from '../codex/protocol/generated/v2/ApprovalsReviewer';
 import type { ThreadStartParams } from '../codex/protocol/generated/v2/ThreadStartParams';
 import type { ThreadStartResponse } from '../codex/protocol/generated/v2/ThreadStartResponse';
+import type { ThreadTokenUsage } from '../codex/protocol/generated/v2/ThreadTokenUsage';
 import type { ConversationConfigDefaults } from '../codex/protocol/guards';
 import { asError } from '../common/errors';
 import { conversationErrorMessage } from '../conversation/conversationPanelManager';
@@ -44,6 +45,7 @@ import {
   restoreThreadsWebviewState,
   type ConversationExecutionViewModel,
   type ConversationAttachmentViewModel,
+  type ConversationContextWindowViewModel,
   type ConversationOperation,
   type ConversationScreenState,
   type ConversationSuggestionKind,
@@ -69,6 +71,8 @@ const ACTION_COMMANDS: Readonly<Record<ThreadListAction, string>> = {
   archive: 'codexThreadManager.archive',
   unarchive: 'codexThreadManager.unarchive'
 };
+
+const CONTEXT_WINDOW_BASELINE_TOKENS = 12_000;
 
 export interface ThreadListWebviewLogger {
   appendLine(value: string): void;
@@ -241,7 +245,10 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private readonly conversationDrafts = new Map<string, ConversationDraft>();
   private readonly pendingBookmarkUpdates = new Set<string>();
   private readonly latestCompletedTurnByThread = new Map<string, string>();
-  private readonly contextWindowByThread = new Map<string, { turnId: string; remainingPercent: number }>();
+  private readonly contextWindowByThread = new Map<string, {
+    turnId: string;
+    value: ConversationContextWindowViewModel;
+  }>();
   private readonly unreadCompletedTurnByThread = new Map<string, string>();
   private conversationScreenOpen = false;
   private webviewFocused = false;
@@ -625,17 +632,13 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         const session = this.conversationSessions.get(update.threadId);
         const latestTurnId = session?.snapshot().model.turns.at(-1)?.id;
         if (latestTurnId !== update.turnId) return;
-        if (update.tokenUsage.modelContextWindow === null) {
+        const contextWindow = calculateContextWindowUsage(update.tokenUsage);
+        if (contextWindow === null) {
           this.contextWindowByThread.delete(update.threadId);
           if (update.threadId === this.activeThread?.id) this.postCurrentConversationState();
           return;
         }
-        const used = update.tokenUsage.total.totalTokens;
-        const remainingPercent = Math.round(Math.max(0, Math.min(
-          100,
-          (1 - used / update.tokenUsage.modelContextWindow) * 100
-        )));
-        this.contextWindowByThread.set(update.threadId, { turnId: update.turnId, remainingPercent });
+        this.contextWindowByThread.set(update.threadId, { turnId: update.turnId, value: contextWindow });
         if (update.threadId === this.activeThread?.id) this.postCurrentConversationState();
       } catch (error) {
         this.options.logger.appendLine(`[threads] Ignored malformed token usage update: ${asError(error).message}`);
@@ -2256,7 +2259,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       attachments: draft.attachments.map(toAttachmentViewModel),
       interactions: [],
       bookmarkedTurnIds: [],
-      contextWindowRemainingPercent: null,
+      contextWindow: null,
       ...(notice ? { notice } : {})
     };
   }
@@ -2289,7 +2292,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       draft.text,
       draft.attachments.map(toAttachmentViewModel),
       bookmarkedTurnIds,
-      contextWindowRemainingPercent(snapshot, this.contextWindowByThread),
+      conversationContextWindow(snapshot, this.contextWindowByThread),
       draft.notice
     );
   }
@@ -2772,7 +2775,7 @@ function toConversationScreenState(
   draftText: string,
   attachments: ConversationScreenState['attachments'],
   bookmarkedTurnIds: ConversationScreenState['bookmarkedTurnIds'],
-  contextWindowRemainingPercent: number | null,
+  contextWindow: ConversationContextWindowViewModel | null,
   draftNotice?: string
 ): ConversationScreenState {
   const execution = toConversationExecution(snapshot);
@@ -2789,7 +2792,7 @@ function toConversationScreenState(
       attachments,
       interactions,
       bookmarkedTurnIds,
-      contextWindowRemainingPercent,
+      contextWindow,
       notice
     }
     : {
@@ -2803,16 +2806,32 @@ function toConversationScreenState(
       attachments,
       interactions,
       bookmarkedTurnIds,
-      contextWindowRemainingPercent
+      contextWindow
     };
 }
 
-function contextWindowRemainingPercent(
+function conversationContextWindow(
   snapshot: ConversationSessionSnapshot,
-  values: ReadonlyMap<string, { turnId: string; remainingPercent: number }>
-): number | null {
+  values: ReadonlyMap<string, { turnId: string; value: ConversationContextWindowViewModel }>
+): ConversationContextWindowViewModel | null {
   const value = values.get(snapshot.model.threadId);
-  return value && value.turnId === snapshot.model.turns.at(-1)?.id ? value.remainingPercent : null;
+  return value && value.turnId === snapshot.model.turns.at(-1)?.id ? value.value : null;
+}
+
+export function calculateContextWindowUsage(
+  tokenUsage: ThreadTokenUsage
+): ConversationContextWindowViewModel | null {
+  const contextWindow = tokenUsage.modelContextWindow;
+  if (contextWindow === null) return null;
+  if (contextWindow <= CONTEXT_WINDOW_BASELINE_TOKENS) return null;
+  const effectiveWindow = contextWindow - CONTEXT_WINDOW_BASELINE_TOKENS;
+  const used = Math.max(0, tokenUsage.last.totalTokens - CONTEXT_WINDOW_BASELINE_TOKENS);
+  const remaining = Math.max(0, effectiveWindow - used);
+  return {
+    remainingPercent: Math.round(Math.max(0, Math.min(100, remaining / effectiveWindow * 100))),
+    remainingTokens: remaining,
+    usableTokens: effectiveWindow
+  };
 }
 
 function cancellationResponse(method: string): unknown {

@@ -1875,12 +1875,15 @@ function updateConversationComposer(): void {
     Boolean(pendingConversationStopRequestId)
   );
   target.activityIndicator.hidden = !activity.activityVisible;
-  const remaining = conversationScreenState?.contextWindowRemainingPercent;
-  target.contextWindow.hidden = remaining === undefined || remaining === null;
-  if (!target.contextWindow.hidden) {
-    target.contextWindow.textContent = `${remaining}%`;
-    target.contextWindow.title = `Context window: ${remaining}% left`;
-    target.contextWindow.setAttribute('aria-label', `Context window: ${remaining}% left`);
+  const contextWindow = conversationScreenState?.contextWindow;
+  target.contextWindow.hidden = !contextWindow;
+  if (contextWindow) {
+    const label = `Context window: ${contextWindow.remainingPercent}% left (` +
+      `${contextWindow.remainingTokens.toLocaleString()} / ` +
+      `${contextWindow.usableTokens.toLocaleString()} usable tokens)`;
+    target.contextWindow.textContent = `${contextWindow.remainingPercent}%`;
+    target.contextWindow.title = label;
+    target.contextWindow.setAttribute('aria-label', label);
   }
   target.status.classList.toggle('sr-only', activity.activityVisible);
   if (target.status.textContent !== activity.statusText) {
