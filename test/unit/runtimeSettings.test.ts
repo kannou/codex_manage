@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ConversationRuntimeSettings } from '../../src/conversation/conversationSession';
 import {
+  applyOptimisticRuntimeSettings,
   conversationPermissionOptions,
   runtimeSettingsSummary,
   standardSpeedLabel
@@ -83,4 +84,35 @@ test('distinguishes unavailable and unlisted runtime values without blank labels
     serviceTier: null,
     defaultServiceTier: null
   })), 'private-model | Ultra | Ask');
+});
+
+test('optimistically reflects reasoning changes in the settings summary', () => {
+  const updated = applyOptimisticRuntimeSettings(runtime({
+    efforts: [
+      { value: 'low', label: 'Low', description: 'Fast' },
+      { value: 'high', label: 'High', description: 'Thorough' }
+    ]
+  }), {
+    model: 'gpt-5.6-sol',
+    effort: 'high',
+    serviceTier: null,
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    approvalsReviewer: 'user'
+  }, false);
+
+  assert.equal(updated.effort, 'high');
+  assert.equal(runtimeSettingsSummary(updated), 'GPT-5.6-Sol | High | Ask');
+});
+
+test('waits for the host catalog before reflecting a model change', () => {
+  const current = runtime();
+  assert.equal(applyOptimisticRuntimeSettings(current, {
+    model: 'another-model',
+    effort: null,
+    serviceTier: null,
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    approvalsReviewer: 'user'
+  }, true), current);
 });
