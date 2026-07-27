@@ -1,4 +1,7 @@
-import type { ConversationRuntimeSettings } from '../../conversation/conversationSession';
+import type {
+  ConversationRuntimeSettings,
+  ConversationRuntimeSettingsUpdate
+} from '../../conversation/conversationSession';
 
 export const conversationPermissionOptions: readonly {
   readonly value: string;
@@ -11,6 +14,25 @@ export const conversationPermissionOptions: readonly {
 ];
 
 export const standardSpeedLabel = 'Standard';
+
+/** Reflect a selection while the extension host applies it. */
+export function applyOptimisticRuntimeSettings(
+  runtime: ConversationRuntimeSettings,
+  update: ConversationRuntimeSettingsUpdate,
+  modelChanged: boolean
+): ConversationRuntimeSettings {
+  // A new model has different option catalogs, so wait for the authoritative
+  // host snapshot rather than briefly rendering options from the old model.
+  if (modelChanged) return runtime;
+  return {
+    ...runtime,
+    effort: update.effort,
+    serviceTier: update.serviceTier,
+    sandbox: update.sandbox,
+    approvalPolicy: update.approvalPolicy,
+    approvalsReviewer: update.approvalsReviewer
+  };
+}
 
 export function runtimeSettingsSummary(runtime: ConversationRuntimeSettings | undefined): string {
   if (!runtime || runtime.status === 'loading') return 'Loading settings…';

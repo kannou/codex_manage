@@ -23,6 +23,7 @@ import {
   type ThreadsWebviewState
 } from './protocol';
 import {
+  applyOptimisticRuntimeSettings,
   conversationPermissionOptions,
   defaultRuntimeLabel,
   runtimeSettingsSummary,
@@ -2203,18 +2204,26 @@ function submitRuntimeSettings(modelChanged: boolean): void {
     renderRuntimeSettings(target);
     return;
   }
+  const settings = {
+    model: target.model.value,
+    effort: modelChanged ? null : target.effort.value || null,
+    serviceTier: modelChanged ? null : target.serviceTier.value || null,
+    sandbox: target.sandbox.value,
+    approvalPolicy: target.approvalPolicy.value,
+    approvalsReviewer: target.approvalsReviewer.value
+  };
+  // The picker itself changes immediately. Update the collapsed button from the
+  // same selection instead of leaving it stale during the host round trip.
+  conversationScreenState = {
+    ...state,
+    runtime: applyOptimisticRuntimeSettings(state.runtime, settings, modelChanged)
+  };
+  renderRuntimeSettings(target);
   vscode.postMessage({
     type: 'threads/conversation/settings',
     sessionId,
     threadId,
-    settings: {
-      model: target.model.value,
-      effort: modelChanged ? null : target.effort.value || null,
-      serviceTier: modelChanged ? null : target.serviceTier.value || null,
-      sandbox: target.sandbox.value,
-      approvalPolicy: target.approvalPolicy.value,
-      approvalsReviewer: target.approvalsReviewer.value
-    }
+    settings
   });
 }
 
