@@ -400,8 +400,19 @@ test('accepts bounded suggestion results without exposing host attachment paths'
     threadId: 'thread-1',
     requestId: 'suggestion-1',
     suggestionId: 'candidate-1',
-    outcome: 'accepted'
+    outcome: 'accepted',
+    attachments: [
+      { id: 'attachment-1', kind: 'mention', name: 'main.ts', sizeBytes: 24 }
+    ]
   }), true);
+  assert.equal(isThreadsHostMessage({
+    type: 'threads/conversationSuggestionSelection',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    requestId: 'suggestion-1',
+    suggestionId: 'candidate-1',
+    outcome: 'accepted'
+  }), false);
 });
 
 test('validates persisted navigation state and host messages', () => {

@@ -1648,38 +1648,38 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       !candidate ||
       !this.canUseConversationSuggestions(message.sessionId, message.threadId, search.kind)
     ) {
-      this.postConversationSuggestionSelection(message, 'rejected');
+      this.postConversationSuggestionSelection(message, undefined);
       return;
     }
     this.conversationSuggestionSearch = undefined;
-    void this.addSuggestedAttachment(search, candidate).then((accepted) => {
-      this.postConversationSuggestionSelection(message, accepted ? 'accepted' : 'rejected');
+    void this.addSuggestedAttachment(search, candidate).then((attachments) => {
+      this.postConversationSuggestionSelection(message, attachments);
     });
   }
 
   private async addSuggestedAttachment(
     search: ConversationSuggestionSearch,
     candidate: ConversationSuggestion
-  ): Promise<boolean> {
+  ): Promise<readonly ConversationAttachmentViewModel[] | undefined> {
     const draft = this.newConversationDraft;
     const attachments = draft?.sessionId === search.sessionId && draft.draftId === search.threadId
       ? draft.attachments
       : this.restoreConversationDraft(search.threadId).attachments;
     if (candidate.kind === 'file') {
       const workspacePath = resolveCurrentWorkspaceFile(candidate.path);
-      if (!workspacePath) return false;
+      if (!workspacePath) return undefined;
       let sizeBytes = 0;
       try {
         const stat = await vscode.workspace.fs.stat(vscode.Uri.file(workspacePath));
         sizeBytes = stat.type === vscode.FileType.File ? stat.size : 0;
       } catch {
-        return false;
+        return undefined;
       }
       if (
         !this.isCurrentSuggestionTarget(search) ||
         !validatePickedMention({ path: workspacePath, sizeBytes })
       ) {
-        return false;
+        return undefined;
       }
       const key = localPathKey(workspacePath);
       const duplicate = attachments.some((attachment) =>
@@ -1690,7 +1690,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         attachments.filter((attachment) => attachment.kind === 'mention').length >=
           MAX_MENTION_ATTACHMENTS
       ) {
-        return false;
+        return undefined;
       }
       if (!duplicate) {
         attachments.push({
@@ -1707,7 +1707,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         kind: 'skill',
         ...candidate.skill
       })) {
-        return false;
+        return undefined;
       }
       const key = localPathKey(candidate.skill.path);
       const duplicate = attachments.some((attachment) =>
@@ -1718,7 +1718,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         attachments.filter((attachment) => attachment.kind === 'skill').length >=
           MAX_SKILL_ATTACHMENTS
       ) {
-        return false;
+        return undefined;
       }
       if (!duplicate) {
         attachments.push({
@@ -1728,8 +1728,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
         });
       }
     }
-    this.postAttachmentState(draft?.sessionId === search.sessionId ? draft : undefined);
-    return true;
+    return attachments.map(toAttachmentViewModel);
   }
 
   private clearConversationSuggestions(
@@ -1817,16 +1816,26 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       readonly requestId: string;
       readonly suggestionId: string;
     },
-    outcome: 'accepted' | 'rejected'
+    attachments: readonly ConversationAttachmentViewModel[] | undefined
   ): void {
-    this.post({
-      type: 'threads/conversationSuggestionSelection',
-      sessionId: message.sessionId,
-      threadId: message.threadId,
-      requestId: message.requestId,
-      suggestionId: message.suggestionId,
-      outcome
-    });
+    this.post(attachments
+      ? {
+        type: 'threads/conversationSuggestionSelection',
+        sessionId: message.sessionId,
+        threadId: message.threadId,
+        requestId: message.requestId,
+        suggestionId: message.suggestionId,
+        outcome: 'accepted',
+        attachments
+      }
+      : {
+        type: 'threads/conversationSuggestionSelection',
+        sessionId: message.sessionId,
+        threadId: message.threadId,
+        requestId: message.requestId,
+        suggestionId: message.suggestionId,
+        outcome: 'rejected'
+      });
   }
 
   private postAttachmentState(draft?: NewConversationDraft): void {
