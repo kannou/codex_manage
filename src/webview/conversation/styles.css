@@ -251,6 +251,10 @@ details .activity-summary {
   line-clamp: 2;
 }
 
+.activity-command .activity-summary {
+  min-height: calc(2lh + 18px);
+}
+
 .activity-detail {
   max-height: 320px;
   overflow: auto;
