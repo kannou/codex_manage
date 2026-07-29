@@ -18,6 +18,7 @@ export const MAX_CONVERSATION_ID_LENGTH = 512;
 export const MAX_THREAD_NAME_LENGTH = 512;
 export const MAX_SUGGESTION_QUERY_LENGTH = 200;
 export const MAX_CONVERSATION_SUGGESTIONS = 20;
+const MAX_CONVERSATION_ATTACHMENTS = 40;
 
 export type ThreadListAction =
   | 'loadMoreActive'
@@ -354,7 +355,16 @@ export type ThreadsHostToWebviewMessage =
     readonly threadId: string;
     readonly requestId: string;
     readonly suggestionId: string;
-    readonly outcome: 'accepted' | 'rejected';
+    readonly outcome: 'accepted';
+    readonly attachments: readonly ConversationAttachmentViewModel[];
+  }
+  | {
+    readonly type: 'threads/conversationSuggestionSelection';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly requestId: string;
+    readonly suggestionId: string;
+    readonly outcome: 'rejected';
   }
   | ConversationOperationResult;
 
@@ -629,16 +639,25 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
         )
       );
     case 'threads/conversationSuggestionSelection':
-      return (
-        hasOnlyKeys(value, [
-          'type', 'sessionId', 'threadId', 'requestId', 'suggestionId', 'outcome'
-        ]) &&
+      if (
         isBoundedId(value.sessionId) &&
         isBoundedId(value.threadId) &&
         isBoundedId(value.requestId) &&
         isBoundedId(value.suggestionId) &&
         (value.outcome === 'accepted' || value.outcome === 'rejected')
-      );
+      ) {
+        return value.outcome === 'accepted'
+          ? hasOnlyKeys(value, [
+            'type', 'sessionId', 'threadId', 'requestId', 'suggestionId', 'outcome', 'attachments'
+          ]) &&
+            Array.isArray(value.attachments) &&
+            value.attachments.length <= MAX_CONVERSATION_ATTACHMENTS &&
+            value.attachments.every(isConversationAttachment)
+          : hasOnlyKeys(value, [
+            'type', 'sessionId', 'threadId', 'requestId', 'suggestionId', 'outcome'
+          ]);
+      }
+      return false;
     default:
       return false;
   }

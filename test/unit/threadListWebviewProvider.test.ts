@@ -606,9 +606,11 @@ test('searches and selects correlated file and Skill suggestions without accepti
   const workspaceDirectory = mkdtempSync(join(tmpdir(), 'codex-thread-suggestions-'));
   const sourceDirectory = join(workspaceDirectory, 'src');
   const filePath = join(sourceDirectory, 'main.ts');
+  const secondFilePath = join(sourceDirectory, 'second.ts');
   const skillPath = join(workspaceDirectory, 'review-SKILL.md');
   mkdirSync(sourceDirectory);
   writeFileSync(filePath, 'export const value = 1;\n');
+  writeFileSync(secondFilePath, 'export const second = 2;\n');
   writeFileSync(skillPath, '# Review\n');
   t.after(() => rmSync(workspaceDirectory, { recursive: true, force: true }));
   (vscode.workspace as unknown as {
@@ -649,9 +651,9 @@ test('searches and selects correlated file and Skill suggestions without accepti
         files: [
           {
             root: workspaceDirectory,
-            path: 'src/main.ts',
+            path: params.query === 'second' ? 'src/second.ts' : 'src/main.ts',
             match_type: 'file',
-            file_name: 'main.ts',
+            file_name: params.query === 'second' ? 'second.ts' : 'main.ts',
             score: 100,
             indices: null
           },
@@ -781,6 +783,41 @@ test('searches and selects correlated file and Skill suggestions without accepti
     type: 'threads/conversation/suggestion/search',
     sessionId,
     threadId: 'thread-1',
+    requestId: 'file-second',
+    kind: 'file',
+    query: 'second'
+  });
+  await flushPromises();
+  const secondFileSuggestions = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type === 'threads/conversationSuggestions' &&
+    (message as { requestId?: unknown }).requestId === 'file-second'
+  ) as { suggestions: Array<{ id: string; name: string }> };
+  const secondFileSuggestionId = secondFileSuggestions.suggestions[0]?.id;
+  assert.equal(secondFileSuggestions.suggestions[0]?.name, 'second.ts');
+  assert.ok(secondFileSuggestionId);
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/select',
+    sessionId,
+    threadId: 'thread-1',
+    requestId: 'file-second',
+    suggestionId: secondFileSuggestionId
+  });
+  await flushPromises();
+  await flushPromises();
+  const afterSecondFile = [...view.webview.postedMessages].reverse().find((message) =>
+    (message as { type?: unknown; requestId?: unknown }).type ===
+      'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-second'
+  ) as { attachments: Array<{ kind: string; name: string }> };
+  assert.deepEqual(
+    afterSecondFile.attachments.map(({ kind, name }) => ({ kind, name })),
+    [{ kind: 'mention', name: 'main.ts' }, { kind: 'mention', name: 'second.ts' }]
+  );
+
+  view.webview.fire({
+    type: 'threads/conversation/suggestion/search',
+    sessionId,
+    threadId: 'thread-1',
     requestId: 'skill-new',
     kind: 'skill',
     query: 'rev'
@@ -853,11 +890,17 @@ test('searches and selects correlated file and Skill suggestions without accepti
     (message as { outcome?: unknown }).outcome === 'accepted'
   ), true);
   const afterDuplicate = [...view.webview.postedMessages].reverse().find((message) =>
-    (message as { state?: { attachments?: unknown[] } }).state?.attachments?.length === 2
-  ) as { state: { attachments: Array<{ kind: string; name: string }> } };
+    (message as { type?: unknown; requestId?: unknown }).type ===
+      'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-duplicate'
+  ) as { attachments: Array<{ kind: string; name: string }> };
   assert.deepEqual(
-    afterDuplicate.state.attachments.map(({ kind, name }) => ({ kind, name })),
-    [{ kind: 'mention', name: 'main.ts' }, { kind: 'skill', name: 'review' }]
+    afterDuplicate.attachments.map(({ kind, name }) => ({ kind, name })),
+    [
+      { kind: 'mention', name: 'main.ts' },
+      { kind: 'mention', name: 'second.ts' },
+      { kind: 'skill', name: 'review' }
+    ]
   );
 
   view.webview.fire({
@@ -879,6 +922,17 @@ test('searches and selects correlated file and Skill suggestions without accepti
           end: Buffer.byteLength(`Referenced file: ${filePath}`, 'utf8')
         },
         placeholder: '@main.ts'
+      }]
+    },
+    {
+      type: 'text',
+      text: `Referenced file: ${secondFilePath}`,
+      text_elements: [{
+        byteRange: {
+          start: 17,
+          end: Buffer.byteLength(`Referenced file: ${secondFilePath}`, 'utf8')
+        },
+        placeholder: '@second.ts'
       }]
     },
     { type: 'skill', name: 'review', path: skillPath }

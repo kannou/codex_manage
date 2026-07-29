@@ -1579,6 +1579,12 @@ function handleConversationSuggestionSelection(
   }
   pendingConversationSuggestionSelection = undefined;
   if (message.outcome === 'accepted') {
+    if (conversationScreenState) {
+      conversationScreenState = {
+        ...conversationScreenState,
+        attachments: message.attachments
+      };
+    }
     const applied = applyComposerSuggestion(target.input.value, pending.trigger);
     if (applied) {
       target.input.value = applied.text;
