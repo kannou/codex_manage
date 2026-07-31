@@ -300,12 +300,25 @@ test('creates one conversation from the first message and transitions to its run
   const threadStarts: unknown[] = [];
   const turnStarts: unknown[] = [];
   const created: string[] = [];
+  const firstModel = runtimeModel();
+  const compatibleModel: Model = {
+    ...firstModel,
+    id: 'gpt-compatible',
+    model: 'gpt-compatible',
+    displayName: 'GPT Compatible',
+    defaultReasoningEffort: 'high',
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'medium', description: 'Balanced' },
+      { reasoningEffort: 'high', description: 'Thorough' }
+    ],
+    isDefault: false
+  };
   const client: ConversationSessionClient = {
     ...fakeConversationClient(async (threadId) => createThread({ id: threadId })),
     resumeThread: async () => {
       throw new Error('New conversations must not resume immediately after thread/start.');
     },
-    listModels: async () => ({ data: [runtimeModel()], nextCursor: null }),
+    listModels: async () => ({ data: [firstModel, compatibleModel], nextCursor: null }),
     startTurn: async (params) => {
       turnStarts.push(params);
       return {
@@ -327,7 +340,7 @@ test('creates one conversation from the first message and transitions to its run
       return startResponse(createThread({ id: 'thread-created', name: null, preview: '' }));
     },
     readConversationConfig: async () => ({
-      model: 'gpt-fixture',
+      model: firstModel.id,
       reasoningEffort: null,
       serviceTier: null,
       sandbox: 'workspace-write',
@@ -357,8 +370,8 @@ test('creates one conversation from the first message and transitions to its run
     sessionId,
     threadId: draftId,
     settings: {
-      model: 'gpt-fixture',
-      effort: 'medium',
+      model: compatibleModel.id,
+      effort: null,
       serviceTier: 'priority',
       sandbox: 'read-only',
       approvalPolicy: 'never',
@@ -383,7 +396,7 @@ test('creates one conversation from the first message and transitions to its run
 
   assert.equal(threadStarts.length, 1);
   assert.deepEqual(threadStarts[0], {
-    model: 'gpt-fixture',
+    model: compatibleModel.model,
     serviceTier: 'priority',
     cwd: 'D:\\workspace',
     approvalPolicy: 'never',

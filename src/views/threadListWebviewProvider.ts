@@ -1249,6 +1249,16 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   ): void {
     const draft = this.newConversationDraft;
     if (draft?.sessionId === sessionId && draft.draftId === threadId) {
+      const selectedModel = draft.models.find((model) => model.id === settings.model);
+      const currentEffort = draft.runtime.effort ?? draft.runtime.defaultEffort;
+      const resolvedSettings = settings.model !== draft.runtime.model
+        ? {
+          ...settings,
+          effort: currentEffort && selectedModel?.supportedReasoningEfforts.some(
+            (option) => option.reasoningEffort === currentEffort
+          ) ? currentEffort : null
+        }
+        : settings;
       if (
         draft.createPending ||
         draft.runtime.status !== 'ready' ||
@@ -1256,26 +1266,26 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
           draft.models,
           draft.runtime.approvalPolicy,
           draft.runtime.approvalsReviewer,
-          settings
+          resolvedSettings
         )
       ) {
         this.options.logger.appendLine('[threads] Ignored invalid new conversation settings.');
         return;
       }
-      if (settings.approvalPolicy !== 'custom') {
-        draft.approvalPolicy = settings.approvalPolicy;
+      if (resolvedSettings.approvalPolicy !== 'custom') {
+        draft.approvalPolicy = resolvedSettings.approvalPolicy;
       }
-      if (settings.approvalsReviewer !== 'custom') {
-        draft.approvalsReviewer = settings.approvalsReviewer;
+      if (resolvedSettings.approvalsReviewer !== 'custom') {
+        draft.approvalsReviewer = resolvedSettings.approvalsReviewer;
       }
       draft.runtime = createConversationRuntimeSettings(
         draft.models,
-        settings.model,
-        settings.effort,
-        settings.serviceTier,
-        settings.sandbox,
-        settings.approvalPolicy,
-        settings.approvalsReviewer
+        resolvedSettings.model,
+        resolvedSettings.effort,
+        resolvedSettings.serviceTier,
+        resolvedSettings.sandbox,
+        resolvedSettings.approvalPolicy,
+        resolvedSettings.approvalsReviewer
       );
       this.postNewConversationState(draft, { kind: 'idle' });
       return;
