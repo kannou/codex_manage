@@ -621,6 +621,7 @@ function renderThreadCard(thread: ThreadListItemViewModel): HTMLElement {
   const open = actionButton('', 'open', thread.id);
   open.className = 'thread-open';
   open.dataset.threadTitle = thread.title;
+  open.title = thread.title;
   open.setAttribute(
     'aria-label',
     `Open conversation: ${thread.title}, ${thread.description}${
