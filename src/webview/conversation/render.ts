@@ -4,7 +4,7 @@ import type {
   ConversationViewModel
 } from '../../conversation/conversationViewModel';
 import { formatTurnDuration } from './duration';
-import { renderMarkdown } from './markdown';
+import { renderMarkdown, renderPlainText } from './markdown';
 
 export interface ConversationRenderTarget {
   readonly title: HTMLElement;
@@ -423,7 +423,12 @@ function updateItem(
     element.dataset.itemRole = item.role;
     setClassName(element, `message message-${item.role}`);
     element.setAttribute('aria-label', item.role === 'user' ? 'Your message' : 'Codex response');
-    renderMarkdown(requiredDescendant<HTMLElement>(element, '.message-text'), item.text);
+    const text = requiredDescendant<HTMLElement>(element, '.message-text');
+    if (item.role === 'user') {
+      renderPlainText(text, item.text);
+    } else {
+      renderMarkdown(text, item.text);
+    }
     updateMessageBookmark(element, item, turn, bookmarked, enableMessageBookmarks);
     updateCopyControls(element, item, turn);
     return;

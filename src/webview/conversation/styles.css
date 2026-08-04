@@ -177,6 +177,7 @@ summary:focus-visible {
 }
 
 .message-text { min-width: 0; max-width: 100%; overflow-wrap: anywhere; line-height: 1.5; }
+.message-user .message-text { white-space: pre-wrap; }
 .message-text > :first-child { margin-top: 0; }
 .message-text > :last-child { margin-bottom: 0; }
 .message-text p { margin: 0 0 0.75em; }
@@ -188,6 +189,10 @@ summary:focus-visible {
 .message-text h6 { margin: 0.9em 0 0.45em; line-height: 1.25; }
 .message-text ul,
 .message-text ol { margin: 0.5em 0; padding-left: 1.6em; }
+.message-text li > ul,
+.message-text li > ol { margin: 0.3em 0; padding-left: 1.8em; }
+.message-text ul ul { list-style-type: circle; }
+.message-text ul ul ul { list-style-type: square; }
 .message-text blockquote {
   margin: 0.6em 0;
   padding-left: 0.8em;
