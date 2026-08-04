@@ -60,7 +60,7 @@ const conversationState = {
     { id: 'attachment-3', kind: 'skill', name: 'review', description: 'Review changes' }
   ],
   interactions: [],
-  bookmarkedTurnIds: ['turn-1'],
+  bookmarkedMessages: [{ turnId: 'turn-1', itemId: 'message-1' }],
   contextWindow: {
     remainingPercent: 12,
     remainingTokens: 28_607,
@@ -291,13 +291,21 @@ test('accepts bounded composer actions and rejects arbitrary conversation payloa
     type: 'threads/conversation/bookmark/toggle',
     sessionId: 'session-1',
     threadId: 'thread-1',
-    turnId: 'turn-1'
+    turnId: 'turn-1',
+    itemId: 'message-1'
   }), true);
   assert.equal(isThreadsWebviewMessage({
     type: 'threads/conversation/bookmark/toggle',
     sessionId: 'session-1',
     threadId: 'thread-1',
+    turnId: 'turn-1'
+  }), false);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
     turnId: 'turn-1',
+    itemId: 'message-1',
     bookmarked: true
   }), false);
 
@@ -555,7 +563,8 @@ test('validates persisted navigation state and host messages', () => {
           }]
         }]
       },
-      execution: { kind: 'idle' }
+      execution: { kind: 'idle' },
+      bookmarkedMessages: []
     }
   }), true);
   assert.equal(isThreadsHostMessage({
@@ -567,11 +576,20 @@ test('validates persisted navigation state and host messages', () => {
   }), false);
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',
-    state: { ...conversationState, bookmarkedTurnIds: ['turn-missing'] }
+    state: {
+      ...conversationState,
+      bookmarkedMessages: [{ turnId: 'turn-missing', itemId: 'message-1' }]
+    }
   }), false);
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',
-    state: { ...conversationState, bookmarkedTurnIds: ['turn-1', 'turn-1'] }
+    state: {
+      ...conversationState,
+      bookmarkedMessages: [
+        { turnId: 'turn-1', itemId: 'message-1' },
+        { turnId: 'turn-1', itemId: 'message-1' }
+      ]
+    }
   }), false);
   assert.equal(isThreadsHostMessage({
     type: 'threads/conversationState',

@@ -233,7 +233,7 @@ app.addEventListener('click', (event) => {
     return;
   }
   if (action === 'bookmark-toggle') {
-    toggleTurnBookmark(element.dataset.turnId);
+    toggleMessageBookmark(element);
     return;
   }
   if (action === 'copy-conversation') {
@@ -739,14 +739,16 @@ function showConversationShell(
   heading.append(titleElement, titleInput, titleStatus, meta);
   const bookmarks = document.createElement('select');
   bookmarks.className = 'conversation-bookmarks';
-  bookmarks.setAttribute('aria-label', 'Go to bookmarked turn');
+  bookmarks.setAttribute('aria-label', 'Go to bookmarked message');
   bookmarks.append(new Option('No bookmarks', ''));
   bookmarks.hidden = true;
   bookmarks.disabled = true;
   bookmarks.addEventListener('change', () => {
-    const turnId = bookmarks.value;
+    const option = bookmarks.selectedOptions[0];
+    const turnId = option?.dataset.turnId;
+    const itemId = option?.dataset.itemId;
     bookmarks.value = '';
-    jumpToTurn(turnId);
+    jumpToMessage(turnId, itemId);
   });
   const reload = actionButton('', 'reload');
   reload.className = 'conversation-header-action reload-button';
@@ -1132,8 +1134,8 @@ function renderPendingConversationState(): void {
   conversationLatestState = latest.state;
   const target = requireConversationTarget();
   renderConversation(target, state.model, {
-    bookmarkedTurnIds: state.bookmarkedTurnIds,
-    enableTurnBookmarks: true
+    bookmarkedMessages: state.bookmarkedMessages,
+    enableMessageBookmarks: true
   });
   if (conversationTitleButton) {
     conversationTitleButton.setAttribute('aria-label', `Rename thread: ${state.model.title}`);
@@ -1172,40 +1174,50 @@ function renderPendingConversationState(): void {
 function updateConversationBookmarks(state: ConversationScreenState): void {
   const select = conversationBookmarksTarget;
   if (!select) return;
-  const bookmarked = new Set(state.bookmarkedTurnIds);
-  const entries = state.model.turns
-    .map((turn, index) => ({ turn, index }))
-    .filter(({ turn }) => bookmarked.has(turn.id));
+  const bookmarked = new Set(state.bookmarkedMessages.map(messageBookmarkKey));
+  const entries = state.model.turns.flatMap((turn, turnIndex) => turn.items
+    .filter((item) => item.kind === 'message' && bookmarked.has(messageBookmarkKey({
+      turnId: turn.id,
+      itemId: item.id
+    })))
+    .map((item) => ({ turn, turnIndex, item })));
   const options = [new Option(
     entries.length ? `★ ${entries.length}` : 'No bookmarks',
     ''
   )];
-  for (const { turn, index } of entries) {
-    const preview = turn.items.find(
-      (item) => item.kind === 'message' && item.role === 'user' && item.text.trim()
+  for (const { turn, turnIndex, item } of entries) {
+    if (item.kind !== 'message') continue;
+    const text = item.text.trim().replace(/\s+/gu, ' ').slice(0, 48);
+    const role = item.role === 'user' ? 'You' : 'Codex';
+    const option = new Option(
+      `Turn ${turnIndex + 1} · ${role}${text ? ` · ${text}` : ''}`,
+      messageBookmarkKey({ turnId: turn.id, itemId: item.id })
     );
-    const text = preview?.kind === 'message'
-      ? preview.text.trim().replace(/\s+/gu, ' ').slice(0, 48)
-      : '';
-    options.push(new Option(`Turn ${index + 1}${text ? ` · ${text}` : ''}`, turn.id));
+    option.dataset.turnId = turn.id;
+    option.dataset.itemId = item.id;
+    options.push(option);
   }
   select.replaceChildren(...options);
-  select.title = entries.length ? `${entries.length} bookmarked turns` : '';
+  select.title = entries.length ? `${entries.length} bookmarked messages` : '';
   select.hidden = entries.length === 0;
   select.disabled = entries.length === 0;
 }
 
-function toggleTurnBookmark(turnId: string | undefined): void {
+function toggleMessageBookmark(element: HTMLElement): void {
   const state = conversationScreenState;
+  const { turnId, itemId } = element.dataset;
   if (
-    !turnId || !state || !conversationSessionId || !conversationThreadId ||
-    !state.model.turns.some((turn) => turn.id === turnId)
+    !turnId || !itemId || !state || !conversationSessionId || !conversationThreadId ||
+    !state.model.turns.some((turn) => turn.id === turnId && turn.items.some(
+      (item) => item.kind === 'message' && item.id === itemId
+    ))
   ) return;
   vscode.postMessage({
     type: 'threads/conversation/bookmark/toggle',
     sessionId: conversationSessionId,
     threadId: conversationThreadId,
-    turnId
+    turnId,
+    itemId
   });
 }
 
@@ -1261,16 +1273,28 @@ function handleConversationCopyResult(
   }, 2_000);
 }
 
-function jumpToTurn(turnId: string | undefined): void {
-  if (!turnId || !conversationScreenState?.bookmarkedTurnIds.includes(turnId)) return;
-  const turn = app.querySelector<HTMLElement>(`.turn[data-turn-id="${cssEscape(turnId)}"]`);
-  if (!turn) return;
-  turn.scrollIntoView({ block: 'start' });
-  turn.focus({ preventScroll: true });
-  const heading = turn.querySelector<HTMLElement>('.turn-header h2')?.textContent ?? 'bookmarked turn';
+function jumpToMessage(turnId: string | undefined, itemId: string | undefined): void {
+  if (
+    !turnId ||
+    !itemId ||
+    !conversationScreenState?.bookmarkedMessages.some((bookmark) => (
+      bookmark.turnId === turnId && bookmark.itemId === itemId
+    ))
+  ) return;
+  const message = app.querySelector<HTMLElement>(
+    `.turn[data-turn-id="${cssEscape(turnId)}"] .message[data-item-id="${cssEscape(itemId)}"]`
+  );
+  if (!message) return;
+  message.scrollIntoView({ block: 'center' });
+  message.focus({ preventScroll: true });
+  const label = message.dataset.itemRole === 'user' ? 'your bookmarked message' : 'the bookmarked Codex response';
   if (conversationComposerTarget) {
-    conversationComposerTarget.announcer.textContent = `Moved to ${heading}.`;
+    conversationComposerTarget.announcer.textContent = `Moved to ${label}.`;
   }
+}
+
+function messageBookmarkKey(bookmark: { readonly turnId: string; readonly itemId: string }): string {
+  return `${bookmark.turnId}\0${bookmark.itemId}`;
 }
 
 function moveToLatestConversationActivity(): void {
