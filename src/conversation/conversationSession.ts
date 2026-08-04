@@ -385,9 +385,7 @@ export class ConversationSession {
         return false;
       }
 
-      if (notificationVersion === this.notificationVersion) {
-        this.replaceReducer(hydrateConversationReducer(this.reducer, resumed.thread), false);
-      } else {
+      if (notificationVersion !== this.notificationVersion) {
         this.updatePresentation({
           sync: 'stale',
           operation: activeConversationTurnId(this.reducer) ? 'running' : 'idle',
@@ -395,7 +393,34 @@ export class ConversationSession {
         });
         return false;
       }
-      const resumedState = createConversationReducerState(resumed.thread);
+
+      let resumedThread = resumed.thread;
+      let resumedState = createConversationReducerState(resumedThread);
+      if (resumedState.needsResync) {
+        const response = await this.client.readThread({
+          threadId: this.reducer.thread.id,
+          includeTurns: true
+        });
+        if (!this.isCurrent(generation)) {
+          return false;
+        }
+        if (response.thread.id !== this.reducer.thread.id) {
+          this.failOperation('Codex returned a different conversation while resuming.');
+          return false;
+        }
+        if (notificationVersion !== this.notificationVersion) {
+          this.updatePresentation({
+            sync: 'stale',
+            operation: activeConversationTurnId(this.reducer) ? 'running' : 'idle',
+            notice: 'Conversation activity changed while resuming. Reload before sending again.'
+          });
+          return false;
+        }
+        resumedThread = response.thread;
+        resumedState = createConversationReducerState(resumedThread);
+      }
+
+      this.replaceReducer(hydrateConversationReducer(this.reducer, resumedThread), false);
       if (
         this.reducer.needsResync ||
         resumedState.needsResync ||
@@ -524,6 +549,14 @@ export class ConversationSession {
     this.notificationVersion += 1;
     const previousReducer = this.reducer;
     this.reducer = reduceConversationNotification(this.reducer, notification);
+    if (
+      this.operation === 'interrupting' &&
+      notification.method === 'thread/status/changed' &&
+      notification.params.status.type === 'idle' &&
+      !previousReducer.needsResync
+    ) {
+      this.reducer = { ...this.reducer, needsResync: false };
+    }
     let nextOperation = this.operation;
     let nextNotice = this.notice;
 

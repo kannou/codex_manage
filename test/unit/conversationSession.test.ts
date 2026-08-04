@@ -656,7 +656,7 @@ test('ignores an automatic completion read that resolves after disconnect', asyn
   assert.match(session.snapshot().notice ?? '', /connection closed/iu);
 });
 
-test('stops only the host-owned active turn and rejects a duplicate Stop', async () => {
+test('stops only the host-owned active turn and accepts idle status before completion', async () => {
   const interrupt = deferred<Record<string, never>>();
   const calls: unknown[] = [];
   const client: ConversationSessionClient = {
@@ -680,18 +680,51 @@ test('stops only the host-owned active turn and rejects a duplicate Stop', async
   assert.equal(session.snapshot().operation, 'interrupting');
 
   session.applyNotification({
+    method: 'thread/status/changed',
+    params: { threadId: 'thread-1', status: { type: 'idle' } }
+  });
+  assert.equal(session.snapshot().sync, 'ready');
+  assert.equal(session.snapshot().operation, 'interrupting');
+
+  session.applyNotification({
     method: 'turn/completed',
     params: {
       threadId: 'thread-1',
       turn: createTurn({ id: 'turn-owned', status: 'interrupted' })
     }
   });
-  session.applyNotification({
-    method: 'thread/status/changed',
-    params: { threadId: 'thread-1', status: { type: 'idle' } }
-  });
   assert.equal(session.snapshot().operation, 'idle');
   assert.equal(session.snapshot().notice, 'The turn was stopped.');
+  assert.equal(await session.send('Next message'), true);
+});
+
+test('reads authoritative history when resume returns a stale interrupted turn', async () => {
+  const interrupted = createTurn({ id: 'turn-interrupted', status: 'interrupted' });
+  const current = createThread({ turns: [interrupted] });
+  const stale = createThread({
+    turns: [liveTurn('turn-interrupted')]
+  });
+  let reads = 0;
+  let starts = 0;
+  const client: ConversationSessionClient = {
+    ...passiveClient(),
+    resumeThread: async () => resumeResponse(stale),
+    readThread: async () => {
+      reads += 1;
+      return { thread: current };
+    },
+    startTurn: async () => {
+      starts += 1;
+      return { turn: liveTurn('turn-next') };
+    }
+  };
+  const session = new ConversationSession(client, current);
+
+  assert.equal(await session.send('Next message'), true);
+  assert.equal(reads, 1);
+  assert.equal(starts, 1);
+  assert.equal(session.snapshot().sync, 'ready');
+  assert.equal(session.snapshot().activeTurnId, 'turn-next');
 });
 
 test('keeps history while disconnected and replaces it after resume/read resync', async () => {
