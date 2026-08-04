@@ -12,6 +12,7 @@ import type { Turn } from '../../src/codex/protocol/generated/v2/Turn';
 import type { ThreadItem } from '../../src/codex/protocol/generated/v2/ThreadItem';
 import type { ThreadDisplayModel, ThreadRepositorySnapshot } from '../../src/codex/threadRepository';
 import type { ConversationSessionClient } from '../../src/conversation/conversationSession';
+import type { ConversationBookmark } from '../../src/state/turnBookmarkStore';
 import {
   calculateContextWindowUsage,
   ThreadListWebviewProvider
@@ -1382,30 +1383,77 @@ test('renames only the active conversation and publishes the updated title', asy
   assert.deepEqual(messages.at(-1), { type: 'threads/conversationRenameResult', sessionId: loaded.state.sessionId, threadId: 'thread-1', outcome: 'accepted', name: 'Renamed here' });
 });
 
-test('persists turn bookmarks, filters missing turns, and rejects unknown turn requests', async (t) => {
+test('maps legacy turn bookmarks to first messages and bookmarks individual responses', async (t) => {
   setWorkspace();
-  const bookmarks = new Map<string, string[]>([
-    ['thread-1', ['turn-2', 'turn-missing']]
+  const bookmarks = new Map<string, ConversationBookmark[]>([
+    ['thread-1', [{ turnId: 'turn-2' }, { turnId: 'turn-missing' }]]
   ]);
-  const writes: Array<{ threadId: string; turnId: string; bookmarked: boolean }> = [];
+  const writes: Array<{
+    threadId: string;
+    turnId: string;
+    itemId: string;
+    bookmarked: boolean;
+    removeLegacyTurnBookmark: boolean;
+  }> = [];
   const provider = new ThreadListWebviewProvider({
     extensionUri: vscode.Uri.file('/extension'),
     turnBookmarkStore: {
-      getBookmarkedTurnIds: (threadId) => bookmarks.get(threadId) ?? [],
-      setBookmarked: async (threadId, turnId, bookmarked) => {
-        writes.push({ threadId, turnId, bookmarked });
+      getBookmarks: (threadId) => bookmarks.get(threadId) ?? [],
+      setBookmarked: async (threadId, turnId, itemId, bookmarked, removeLegacyTurnBookmark = false) => {
+        writes.push({ threadId, turnId, itemId, bookmarked, removeLegacyTurnBookmark });
         const current = bookmarks.get(threadId) ?? [];
+        const remaining = current.filter((bookmark) => (
+          bookmark.turnId !== turnId ||
+          bookmark.itemId !== itemId && !(removeLegacyTurnBookmark && bookmark.itemId === undefined)
+        ));
         bookmarks.set(
           threadId,
           bookmarked
-            ? [turnId, ...current.filter((id) => id !== turnId)]
-            : current.filter((id) => id !== turnId)
+            ? [{ turnId, itemId }, ...remaining]
+            : remaining
         );
       }
     },
     conversationClient: fakeConversationClient(async (threadId) => createThread({
       id: threadId,
-      turns: [createTurn({ id: 'turn-1' }), createTurn({ id: 'turn-2' })]
+      turns: [
+        createTurn({
+          id: 'turn-1',
+          items: [
+            {
+              type: 'userMessage',
+              id: 'user-1',
+              clientId: null,
+              content: [{ type: 'text', text: 'First prompt', text_elements: [] }]
+            },
+            {
+              type: 'agentMessage',
+              id: 'agent-1',
+              text: 'First response',
+              phase: 'final_answer',
+              memoryCitation: null
+            }
+          ]
+        }),
+        createTurn({
+          id: 'turn-2',
+          items: [
+            {
+              type: 'userMessage',
+              id: 'user-2',
+              clientId: null,
+              content: [{ type: 'text', text: 'Second prompt', text_elements: [] }]
+            },
+            {
+              type: 'agentMessage',
+              id: 'agent-2',
+              text: 'Second response',
+              phase: 'final_answer',
+              memoryCitation: null
+            }
+          ]
+        })
+      ]
     })),
     logger: { appendLine: () => undefined }
   });
@@ -1419,30 +1467,61 @@ test('persists turn bookmarks, filters missing turns, and rejects unknown turn r
 
   const loaded = view.webview.postedMessages.find(
     (message) => (message as { type?: unknown }).type === 'threads/conversationLoaded'
-  ) as { state: { sessionId: string; bookmarkedTurnIds: string[] } };
-  assert.deepEqual(loaded.state.bookmarkedTurnIds, ['turn-2']);
+  ) as { state: { sessionId: string; bookmarkedMessages: ConversationBookmark[] } };
+  assert.deepEqual(loaded.state.bookmarkedMessages, [{ turnId: 'turn-2', itemId: 'user-2' }]);
 
   view.webview.fire({
     type: 'threads/conversation/bookmark/toggle',
     sessionId: loaded.state.sessionId,
     threadId: 'thread-1',
-    turnId: 'turn-1'
+    turnId: 'turn-1',
+    itemId: 'agent-1'
   });
   await flushPromises();
-  assert.deepEqual(writes, [{ threadId: 'thread-1', turnId: 'turn-1', bookmarked: true }]);
+  assert.deepEqual(writes, [{
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    itemId: 'agent-1',
+    bookmarked: true,
+    removeLegacyTurnBookmark: false
+  }]);
   const updated = [...view.webview.postedMessages].reverse().find(
     (message) => (message as { type?: unknown }).type === 'threads/conversationState'
-  ) as { state: { bookmarkedTurnIds: string[] } };
-  assert.deepEqual(updated.state.bookmarkedTurnIds, ['turn-1', 'turn-2']);
+  ) as { state: { bookmarkedMessages: ConversationBookmark[] } };
+  assert.deepEqual(updated.state.bookmarkedMessages, [
+    { turnId: 'turn-1', itemId: 'agent-1' },
+    { turnId: 'turn-2', itemId: 'user-2' }
+  ]);
 
   view.webview.fire({
     type: 'threads/conversation/bookmark/toggle',
     sessionId: loaded.state.sessionId,
     threadId: 'thread-1',
-    turnId: 'turn-missing'
+    turnId: 'turn-2',
+    itemId: 'user-2'
   });
   await flushPromises();
-  assert.equal(writes.length, 1);
+  assert.deepEqual(writes.at(-1), {
+    threadId: 'thread-1',
+    turnId: 'turn-2',
+    itemId: 'user-2',
+    bookmarked: false,
+    removeLegacyTurnBookmark: true
+  });
+  assert.deepEqual(bookmarks.get('thread-1'), [
+    { turnId: 'turn-1', itemId: 'agent-1' },
+    { turnId: 'turn-missing' }
+  ]);
+
+  view.webview.fire({
+    type: 'threads/conversation/bookmark/toggle',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    itemId: 'message-missing'
+  });
+  await flushPromises();
+  assert.equal(writes.length, 2);
 });
 
 test('opens a validated changed file and rejects stale or unknown file requests', async (t) => {

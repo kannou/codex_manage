@@ -14,8 +14,11 @@ export interface ConversationRenderTarget {
 }
 
 export interface ConversationRenderOptions {
-  readonly bookmarkedTurnIds?: readonly string[];
-  readonly enableTurnBookmarks?: boolean;
+  readonly bookmarkedMessages?: readonly {
+    readonly turnId: string;
+    readonly itemId: string;
+  }[];
+  readonly enableMessageBookmarks?: boolean;
 }
 
 let nextTurnHeadingId = 0;
@@ -86,16 +89,16 @@ export function renderConversation(
   reconcileTurns(
     target.content,
     model.turns,
-    new Set(options.bookmarkedTurnIds ?? []),
-    options.enableTurnBookmarks === true
+    new Set((options.bookmarkedMessages ?? []).map(messageBookmarkKey)),
+    options.enableMessageBookmarks === true
   );
 }
 
 function reconcileTurns(
   content: HTMLElement,
   turns: readonly ConversationTurnViewModel[],
-  bookmarkedTurnIds: ReadonlySet<string>,
-  enableTurnBookmarks: boolean
+  bookmarkedMessages: ReadonlySet<string>,
+  enableMessageBookmarks: boolean
 ): void {
   const existing = keyedChildren(content, 'turnId');
   const retained = new Set<HTMLElement>();
@@ -105,7 +108,7 @@ function reconcileTurns(
     if (!section || section.dataset.renderKind !== 'turn') {
       section = createTurn();
     }
-    updateTurn(section, turn, index, bookmarkedTurnIds.has(turn.id), enableTurnBookmarks);
+    updateTurn(section, turn, index, bookmarkedMessages, enableMessageBookmarks);
     placeChild(content, section, index);
     retained.add(section);
   });
@@ -126,11 +129,7 @@ function createTurn(): HTMLElement {
   status.className = 'status';
   const controls = document.createElement('div');
   controls.className = 'turn-header-controls';
-  const bookmark = document.createElement('button');
-  bookmark.type = 'button';
-  bookmark.className = 'turn-bookmark-toggle';
-  bookmark.dataset.action = 'bookmark-toggle';
-  controls.append(status, bookmark);
+  controls.append(status);
   header.append(heading, controls);
 
   const metadata = document.createElement('p');
@@ -147,8 +146,8 @@ function updateTurn(
   section: HTMLElement,
   turn: ConversationTurnViewModel,
   index: number,
-  bookmarked: boolean,
-  enableTurnBookmarks: boolean
+  bookmarkedMessages: ReadonlySet<string>,
+  enableMessageBookmarks: boolean
 ): void {
   section.dataset.turnId = turn.id;
   const heading = requiredDescendant<HTMLHeadingElement>(section, '.turn-header h2');
@@ -159,22 +158,10 @@ function updateTurn(
   setClassName(status, `status status-${statusClass(turn.status)}`);
   setTextContent(status, turn.status);
 
-  const bookmark = requiredDescendant<HTMLButtonElement>(section, '.turn-bookmark-toggle');
-  bookmark.hidden = !enableTurnBookmarks;
-  bookmark.dataset.turnId = turn.id;
-  bookmark.classList.toggle('is-bookmarked', bookmarked);
-  bookmark.setAttribute('aria-pressed', String(bookmarked));
-  bookmark.setAttribute(
-    'aria-label',
-    bookmarked ? `Remove bookmark from Turn ${index + 1}` : `Bookmark Turn ${index + 1}`
-  );
-  bookmark.title = bookmarked ? 'Remove bookmark' : 'Bookmark turn';
-  setTextContent(bookmark, bookmarked ? '★' : '☆');
-
   setTextContent(requiredDescendant<HTMLElement>(section, '.turn-meta'), turnMetadata(turn));
   const items = requiredDescendant<HTMLElement>(section, '.turn-items');
   updateTurnError(section, items, turn.errorMessage);
-  reconcileItems(items, turn);
+  reconcileItems(items, turn, bookmarkedMessages, enableMessageBookmarks);
 }
 
 function updateTurnError(
@@ -195,7 +182,12 @@ function updateTurnError(
   }
 }
 
-function reconcileItems(items: HTMLElement, turn: ConversationTurnViewModel): void {
+function reconcileItems(
+  items: HTMLElement,
+  turn: ConversationTurnViewModel,
+  bookmarkedMessages: ReadonlySet<string>,
+  enableMessageBookmarks: boolean
+): void {
   const liveItemIds = turn.liveItemIds ? new Set(turn.liveItemIds) : null;
   const visibleItems = liveItemIds
     ? turn.items.filter((item) => liveItemIds.has(item.id))
@@ -252,7 +244,13 @@ function reconcileItems(items: HTMLElement, turn: ConversationTurnViewModel): vo
     if (!element || !isCompatibleItemElement(element, item)) {
       element = createItem(item);
     }
-    updateItem(element, item, turn);
+    updateItem(
+      element,
+      item,
+      turn,
+      bookmarkedMessages.has(messageBookmarkKey({ turnId: turn.id, itemId: item.id })),
+      enableMessageBookmarks
+    );
     if (item.kind === 'activity' && workDetails && workItems) {
       if (!placedWorkDetails) {
         placeChild(items, workDetails, topLevelIndex++);
@@ -412,7 +410,13 @@ function createItem(item: ConversationItemViewModel): HTMLElement {
   return card;
 }
 
-function updateItem(element: HTMLElement, item: ConversationItemViewModel, turn: ConversationTurnViewModel): void {
+function updateItem(
+  element: HTMLElement,
+  item: ConversationItemViewModel,
+  turn: ConversationTurnViewModel,
+  bookmarked: boolean,
+  enableMessageBookmarks: boolean
+): void {
   element.dataset.itemId = item.id;
   element.dataset.itemKind = item.kind;
   if (item.kind === 'message') {
@@ -420,6 +424,7 @@ function updateItem(element: HTMLElement, item: ConversationItemViewModel, turn:
     setClassName(element, `message message-${item.role}`);
     element.setAttribute('aria-label', item.role === 'user' ? 'Your message' : 'Codex response');
     renderMarkdown(requiredDescendant<HTMLElement>(element, '.message-text'), item.text);
+    updateMessageBookmark(element, item, turn, bookmarked, enableMessageBookmarks);
     updateCopyControls(element, item, turn);
     return;
   }
@@ -466,6 +471,42 @@ function updateItem(element: HTMLElement, item: ConversationItemViewModel, turn:
   if (item.detail && detail) {
     setTextContent(detail, item.detail);
   }
+}
+
+function updateMessageBookmark(
+  element: HTMLElement,
+  item: Extract<ConversationItemViewModel, { kind: 'message' }>,
+  turn: ConversationTurnViewModel,
+  bookmarked: boolean,
+  enabled: boolean
+): void {
+  const current = directChildWithClass(element, 'message-bookmark-toggle');
+  if (!enabled) {
+    current?.remove();
+    element.classList.remove('has-bookmark-control');
+    element.removeAttribute('tabindex');
+    return;
+  }
+  const button = current instanceof HTMLButtonElement
+    ? current
+    : document.createElement('button');
+  button.type = 'button';
+  button.className = 'message-bookmark-toggle';
+  button.dataset.action = 'bookmark-toggle';
+  button.dataset.turnId = turn.id;
+  button.dataset.itemId = item.id;
+  button.classList.toggle('is-bookmarked', bookmarked);
+  button.setAttribute('aria-pressed', String(bookmarked));
+  button.setAttribute('aria-label', bookmarked ? 'Remove bookmark' : 'Bookmark message');
+  button.title = bookmarked ? 'Remove bookmark' : 'Bookmark message';
+  setTextContent(button, bookmarked ? '★' : '☆');
+  element.classList.add('has-bookmark-control');
+  element.tabIndex = -1;
+  if (!current) element.append(button);
+}
+
+function messageBookmarkKey(bookmark: { readonly turnId: string; readonly itemId: string }): string {
+  return `${bookmark.turnId}\0${bookmark.itemId}`;
 }
 
 function updateCopyControls(

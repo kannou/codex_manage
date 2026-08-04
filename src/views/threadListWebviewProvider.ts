@@ -20,7 +20,10 @@ import type { ThreadTokenUsage } from '../codex/protocol/generated/v2/ThreadToke
 import type { ConversationConfigDefaults } from '../codex/protocol/guards';
 import { asError } from '../common/errors';
 import { conversationErrorMessage } from '../conversation/conversationPanelManager';
-import type { TurnBookmarkStorage } from '../state/turnBookmarkStore';
+import type {
+  ConversationBookmark,
+  TurnBookmarkStorage
+} from '../state/turnBookmarkStore';
 import {
   buildConversationInteractionResponse,
   parseConversationInteraction,
@@ -393,7 +396,12 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
             );
             return;
           case 'threads/conversation/bookmark/toggle':
-            this.toggleTurnBookmark(message.sessionId, message.threadId, message.turnId);
+            this.toggleMessageBookmark(
+              message.sessionId,
+              message.threadId,
+              message.turnId,
+              message.itemId
+            );
             return;
           case 'threads/conversation/seen':
             this.confirmCompletedTurnSeen(
@@ -2219,16 +2227,29 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     this.post({ type: 'threads/conversationState', state: this.toConversationScreenState(sessionId, session.snapshot()) });
   }
 
-  private toggleTurnBookmark(sessionId: string, threadId: string, turnId: string): void {
+  private toggleMessageBookmark(
+    sessionId: string,
+    threadId: string,
+    turnId: string,
+    itemId: string
+  ): void {
     const session = this.conversationSession;
     const store = this.options.turnBookmarkStore;
     if (!session || !store || !this.isCurrentSession(sessionId, threadId)) return;
-    if (!session.snapshot().model.turns.some((turn) => turn.id === turnId)) return;
-    const key = `${threadId}\0${turnId}`;
+    const turn = session.snapshot().model.turns.find((candidate) => candidate.id === turnId);
+    const message = turn?.items.find((item) => item.kind === 'message' && item.id === itemId);
+    if (!turn || !message) return;
+    const firstMessageId = turn.items.find((item) => item.kind === 'message')?.id;
+    const legacyFallback = firstMessageId === itemId;
+    const bookmarks = store.getBookmarks(threadId);
+    const bookmarked = bookmarks.some((bookmark) => (
+      bookmark.turnId === turnId &&
+      (bookmark.itemId === itemId || bookmark.itemId === undefined && legacyFallback)
+    ));
+    const key = `${threadId}\0${turnId}\0${itemId}`;
     if (this.pendingBookmarkUpdates.has(key)) return;
-    const bookmarked = store.getBookmarkedTurnIds(threadId).includes(turnId);
     this.pendingBookmarkUpdates.add(key);
-    void store.setBookmarked(threadId, turnId, !bookmarked).then(
+    void store.setBookmarked(threadId, turnId, itemId, !bookmarked, legacyFallback).then(
       () => {
         if (this.conversationSession === session && this.isCurrentSession(sessionId, threadId)) {
           this.postCurrentConversationState();
@@ -2236,7 +2257,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       },
       (error: unknown) => {
         this.options.logger.appendLine(
-          `[threads] Could not update a turn bookmark for sidebar thread ${threadId}: ${asError(error).message}`
+          `[threads] Could not update a message bookmark for sidebar thread ${threadId}: ${asError(error).message}`
         );
       }
     ).finally(() => this.pendingBookmarkUpdates.delete(key));
@@ -2277,17 +2298,17 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       draftText: draft.text,
       attachments: draft.attachments.map(toAttachmentViewModel),
       interactions: [],
-      bookmarkedTurnIds: [],
+      bookmarkedMessages: [],
       contextWindow: null,
       ...(notice ? { notice } : {})
     };
   }
 
   private toConversationScreenState(sessionId: string, snapshot: ConversationSessionSnapshot): ConversationScreenState {
-    const visibleTurnIds = new Set(snapshot.model.turns.map((turn) => turn.id));
-    const bookmarkedTurnIds = (this.options.turnBookmarkStore?.getBookmarkedTurnIds(
-      snapshot.model.threadId
-    ) ?? []).filter((turnId) => visibleTurnIds.has(turnId));
+    const bookmarkedMessages = resolveBookmarkedMessages(
+      this.options.turnBookmarkStore?.getBookmarks(snapshot.model.threadId) ?? [],
+      snapshot.model
+    );
     const draft = this.restoreConversationDraft(snapshot.model.threadId);
     const supportsImageInput = Boolean(
       snapshot.runtime.status === 'ready' && this.conversationSession?.supportsImageInput()
@@ -2310,7 +2331,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       this.availableAdditions(supportsImageInput),
       draft.text,
       draft.attachments.map(toAttachmentViewModel),
-      bookmarkedTurnIds,
+      bookmarkedMessages,
       conversationContextWindow(snapshot, this.contextWindowByThread),
       draft.notice
     );
@@ -2785,6 +2806,26 @@ function conversationTitle(thread: Thread): string {
   return title || 'New conversation';
 }
 
+function resolveBookmarkedMessages(
+  bookmarks: readonly ConversationBookmark[],
+  model: ConversationSessionSnapshot['model']
+): ConversationScreenState['bookmarkedMessages'] {
+  const resolved: ConversationScreenState['bookmarkedMessages'][number][] = [];
+  const seen = new Set<string>();
+  for (const bookmark of bookmarks) {
+    const turn = model.turns.find((candidate) => candidate.id === bookmark.turnId);
+    const message = bookmark.itemId
+      ? turn?.items.find((item) => item.kind === 'message' && item.id === bookmark.itemId)
+      : turn?.items.find((item) => item.kind === 'message');
+    if (!turn || !message) continue;
+    const key = `${turn.id}\0${message.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolved.push({ turnId: turn.id, itemId: message.id });
+  }
+  return resolved;
+}
+
 function toConversationScreenState(
   sessionId: string,
   snapshot: ConversationSessionSnapshot,
@@ -2793,7 +2834,7 @@ function toConversationScreenState(
   availableAdditions: ConversationScreenState['availableAdditions'],
   draftText: string,
   attachments: ConversationScreenState['attachments'],
-  bookmarkedTurnIds: ConversationScreenState['bookmarkedTurnIds'],
+  bookmarkedMessages: ConversationScreenState['bookmarkedMessages'],
   contextWindow: ConversationContextWindowViewModel | null,
   draftNotice?: string
 ): ConversationScreenState {
@@ -2810,7 +2851,7 @@ function toConversationScreenState(
       draftText,
       attachments,
       interactions,
-      bookmarkedTurnIds,
+      bookmarkedMessages,
       contextWindow,
       notice
     }
@@ -2824,7 +2865,7 @@ function toConversationScreenState(
       draftText,
       attachments,
       interactions,
-      bookmarkedTurnIds,
+      bookmarkedMessages,
       contextWindow
     };
 }

@@ -364,7 +364,10 @@ button.thread-action:hover {
   margin: 12px 0;
 }
 
-button.turn-bookmark-toggle {
+.conversation-view button.message-bookmark-toggle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
   width: 25px;
   height: 25px;
   padding: 0;
@@ -372,15 +375,28 @@ button.turn-bookmark-toggle {
   line-height: 23px;
   background: transparent;
   border-color: transparent;
+  opacity: 0;
+  transition: opacity 80ms ease;
 }
 
-button.turn-bookmark-toggle.is-bookmarked {
+.conversation-view button.message-bookmark-toggle.is-bookmarked {
   color: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground));
+  opacity: 1;
 }
 
-button.turn-bookmark-toggle:hover {
+.conversation-view .message:hover > button.message-bookmark-toggle,
+.conversation-view .message:focus-within > button.message-bookmark-toggle,
+.conversation-view button.message-bookmark-toggle:focus-visible {
+  opacity: 1;
+}
+
+.conversation-view button.message-bookmark-toggle:hover {
   color: var(--vscode-foreground);
   background: var(--vscode-toolbar-hoverBackground);
+}
+
+@media (hover: none) {
+  .conversation-view button.message-bookmark-toggle { opacity: 0.72; }
 }
 
 .conversation-interactions {

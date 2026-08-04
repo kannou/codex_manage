@@ -90,9 +90,14 @@ export interface ConversationScreenState {
   readonly draftText: string;
   readonly attachments: readonly ConversationAttachmentViewModel[];
   readonly interactions: readonly ConversationInteractionViewModel[];
-  readonly bookmarkedTurnIds: readonly string[];
+  readonly bookmarkedMessages: readonly ConversationMessageBookmark[];
   readonly contextWindow?: ConversationContextWindowViewModel | null;
   readonly notice?: string;
+}
+
+export interface ConversationMessageBookmark {
+  readonly turnId: string;
+  readonly itemId: string;
 }
 
 export interface UsageSnapshot {
@@ -249,6 +254,7 @@ export type ThreadsWebviewToHostMessage =
     readonly sessionId: string;
     readonly threadId: string;
     readonly turnId: string;
+    readonly itemId: string;
   }
   | {
     readonly type: 'threads/conversation/seen';
@@ -540,10 +546,11 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
   }
   if (value.type === 'threads/conversation/bookmark/toggle') {
     return (
-      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId']) &&
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'turnId', 'itemId']) &&
       isBoundedId(value.sessionId) &&
       isBoundedId(value.threadId) &&
-      isBoundedId(value.turnId)
+      isBoundedId(value.turnId) &&
+      isBoundedId(value.itemId)
     );
   }
   if (value.type === 'threads/conversation/seen') {
@@ -747,20 +754,37 @@ export function isConversationScreenState(value: unknown): value is Conversation
     value.attachments.length <= 40 &&
     value.attachments.every(isConversationAttachment) &&
     Array.isArray(value.interactions) && value.interactions.every(isConversationInteraction) &&
-    isBookmarkedTurnIds(value.bookmarkedTurnIds, value.model) &&
+    isBookmarkedMessages(value.bookmarkedMessages, value.model) &&
     (value.contextWindow === undefined || value.contextWindow === null ||
       isContextWindow(value.contextWindow)) &&
     (value.notice === undefined || typeof value.notice === 'string')
   );
 }
 
-function isBookmarkedTurnIds(value: unknown, model: ConversationViewModel): value is readonly string[] {
-  if (!Array.isArray(value) || value.length > model.turns.length) return false;
-  const turnIds = new Set(model.turns.map((turn) => turn.id));
-  return (
-    new Set(value).size === value.length &&
-    value.every((turnId) => isBoundedId(turnId) && turnIds.has(turnId))
-  );
+function isBookmarkedMessages(
+  value: unknown,
+  model: ConversationViewModel
+): value is readonly ConversationMessageBookmark[] {
+  if (!Array.isArray(value)) return false;
+  const messageIds = new Set(model.turns.flatMap((turn) => turn.items
+    .filter((item) => item.kind === 'message')
+    .map((item) => `${turn.id}\0${item.id}`)));
+  if (value.length > messageIds.size) return false;
+  const seen = new Set<string>();
+  return value.every((bookmark) => {
+    if (
+      !isObject(bookmark) ||
+      !hasOnlyKeys(bookmark, ['turnId', 'itemId']) ||
+      !isBoundedId(bookmark.turnId) ||
+      !isBoundedId(bookmark.itemId)
+    ) {
+      return false;
+    }
+    const key = `${bookmark.turnId}\0${bookmark.itemId}`;
+    if (seen.has(key) || !messageIds.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function isConversationAttachment(value: unknown): value is ConversationAttachmentViewModel {

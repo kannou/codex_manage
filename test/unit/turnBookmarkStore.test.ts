@@ -28,38 +28,52 @@ class MemoryMemento {
 test('stores bookmarks independently by thread and restores them', async () => {
   const state = new MemoryMemento();
   const store = new TurnBookmarkStore(state as Memento);
-  await store.setBookmarked('thread-a', 'turn-1', true);
-  await store.setBookmarked('thread-b', 'turn-1', true);
-  await store.setBookmarked('thread-a', 'turn-2', true);
+  await store.setBookmarked('thread-a', 'turn-1', 'message-1', true);
+  await store.setBookmarked('thread-b', 'turn-1', 'message-2', true);
+  await store.setBookmarked('thread-a', 'turn-2', 'message-3', true);
 
-  assert.deepEqual(store.getBookmarkedTurnIds('thread-a'), ['turn-2', 'turn-1']);
-  assert.deepEqual(store.getBookmarkedTurnIds('thread-b'), ['turn-1']);
+  assert.deepEqual(store.getBookmarks('thread-a'), [
+    { turnId: 'turn-2', itemId: 'message-3' },
+    { turnId: 'turn-1', itemId: 'message-1' }
+  ]);
+  assert.deepEqual(store.getBookmarks('thread-b'), [
+    { turnId: 'turn-1', itemId: 'message-2' }
+  ]);
   assert.deepEqual(
-    new TurnBookmarkStore(state as Memento).getBookmarkedTurnIds('thread-a'),
-    ['turn-2', 'turn-1']
+    new TurnBookmarkStore(state as Memento).getBookmarks('thread-a'),
+    [
+      { turnId: 'turn-2', itemId: 'message-3' },
+      { turnId: 'turn-1', itemId: 'message-1' }
+    ]
   );
 });
 
-test('sanitizes corrupt state and removes one bookmark', async () => {
+test('restores legacy turn bookmarks and removes their first-message fallback', async () => {
   const state = new MemoryMemento();
   state.set('codexThreadManager.turnBookmarks', [
     { threadId: 'thread-a', turnId: 'turn-1' },
     { threadId: 'thread-a', turnId: 'turn-1' },
+    { threadId: 'thread-a', turnId: 'turn-1', itemId: 'message-1' },
     { threadId: '', turnId: 'turn-2' },
-    { threadId: 'thread-a', turnId: 42 }
+    { threadId: 'thread-a', turnId: 42 },
+    { threadId: 'thread-a', turnId: 'turn-2', itemId: 42 }
   ]);
   const store = new TurnBookmarkStore(state as Memento);
 
-  assert.deepEqual(store.getBookmarkedTurnIds('thread-a'), ['turn-1']);
-  await store.setBookmarked('thread-a', 'turn-1', false);
-  assert.deepEqual(store.getBookmarkedTurnIds('thread-a'), []);
+  assert.deepEqual(store.getBookmarks('thread-a'), [
+    { turnId: 'turn-1' },
+    { turnId: 'turn-1', itemId: 'message-1' }
+  ]);
+  await store.setBookmarked('thread-a', 'turn-1', 'message-1', false, true);
+  assert.deepEqual(store.getBookmarks('thread-a'), []);
 });
 
 test('does not write for missing removals or invalid IDs', async () => {
   const state = new MemoryMemento();
   const store = new TurnBookmarkStore(state as Memento);
-  await store.setBookmarked('thread-a', 'turn-missing', false);
-  await store.setBookmarked('', 'turn-1', true);
-  await store.setBookmarked('thread-a', 'x'.repeat(513), true);
+  await store.setBookmarked('thread-a', 'turn-missing', 'message-1', false);
+  await store.setBookmarked('', 'turn-1', 'message-1', true);
+  await store.setBookmarked('thread-a', 'x'.repeat(513), 'message-1', true);
+  await store.setBookmarked('thread-a', 'turn-1', 'x'.repeat(513), true);
   assert.equal(state.updates.length, 0);
 });
