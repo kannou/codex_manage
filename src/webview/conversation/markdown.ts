@@ -4,6 +4,7 @@ export function renderMarkdown(target: HTMLElement, source: string): void {
   if (target.dataset.markdownSource === source) {
     return;
   }
+  delete target.dataset.plainTextSource;
   target.dataset.markdownSource = source;
   const fragment = document.createDocumentFragment();
   const lines = source.replace(/\r\n?/gu, '\n').split('\n');
@@ -55,19 +56,10 @@ export function renderMarkdown(target: HTMLElement, source: string): void {
       continue;
     }
 
-    const listMatch = /^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/u.exec(line);
-    if (listMatch) {
-      const ordered = Boolean(listMatch[2]);
-      const list = document.createElement(ordered ? 'ol' : 'ul');
-      while (index < lines.length) {
-        const itemMatch = /^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/u.exec(lines[index] ?? '');
-        if (!itemMatch || Boolean(itemMatch[2]) !== ordered) break;
-        const item = document.createElement('li');
-        appendInline(item, itemMatch[3] ?? '');
-        list.append(item);
-        index += 1;
-      }
-      fragment.append(list);
+    if (parseListLine(line)) {
+      const rendered = renderList(lines, index);
+      fragment.append(rendered.list);
+      index = rendered.nextIndex;
       continue;
     }
 
@@ -83,6 +75,107 @@ export function renderMarkdown(target: HTMLElement, source: string): void {
   }
 
   target.replaceChildren(fragment);
+}
+
+export function renderPlainText(target: HTMLElement, source: string): void {
+  if (target.dataset.plainTextSource === source) {
+    return;
+  }
+  delete target.dataset.markdownSource;
+  target.dataset.plainTextSource = source;
+  target.textContent = source;
+}
+
+interface ParsedListLine {
+  readonly indent: number;
+  readonly ordered: boolean;
+  readonly text: string;
+}
+
+interface ListFrame {
+  readonly indent: number;
+  readonly ordered: boolean;
+  readonly list: HTMLElement;
+  readonly parentItem: HTMLElement | null;
+  lastItem: HTMLElement | null;
+}
+
+function renderList(
+  lines: readonly string[],
+  startIndex: number
+): { readonly list: HTMLElement; readonly nextIndex: number } {
+  const first = parseListLine(lines[startIndex] ?? '');
+  if (!first) {
+    throw new Error('Expected a Markdown list item.');
+  }
+  const root = document.createElement(first.ordered ? 'ol' : 'ul');
+  const stack: ListFrame[] = [{
+    indent: first.indent,
+    ordered: first.ordered,
+    list: root,
+    parentItem: null,
+    lastItem: null
+  }];
+  let index = startIndex;
+
+  while (index < lines.length) {
+    const parsed = parseListLine(lines[index] ?? '');
+    if (!parsed || parsed.indent < first.indent) break;
+    while (stack.length > 1 && parsed.indent < (stack.at(-1)?.indent ?? 0)) {
+      stack.pop();
+    }
+
+    let frame = stack.at(-1);
+    if (!frame) break;
+    if (parsed.indent > frame.indent) {
+      if (!frame.lastItem) break;
+      const nested = document.createElement(parsed.ordered ? 'ol' : 'ul');
+      frame.lastItem.append(nested);
+      frame = {
+        indent: parsed.indent,
+        ordered: parsed.ordered,
+        list: nested,
+        parentItem: frame.lastItem,
+        lastItem: null
+      };
+      stack.push(frame);
+    } else if (parsed.indent !== frame.indent) {
+      break;
+    } else if (parsed.ordered !== frame.ordered) {
+      if (!frame.parentItem) break;
+      const sibling = document.createElement(parsed.ordered ? 'ol' : 'ul');
+      frame.parentItem.append(sibling);
+      frame = {
+        indent: parsed.indent,
+        ordered: parsed.ordered,
+        list: sibling,
+        parentItem: frame.parentItem,
+        lastItem: null
+      };
+      stack[stack.length - 1] = frame;
+    }
+
+    const item = document.createElement('li');
+    appendInline(item, parsed.text);
+    frame.list.append(item);
+    frame.lastItem = item;
+    index += 1;
+  }
+
+  return { list: root, nextIndex: index };
+}
+
+function parseListLine(line: string): ParsedListLine | null {
+  const match = /^([ \t]*)(?:([-+*])|(\d+)\.)\s+(.+)$/u.exec(line);
+  if (!match) return null;
+  return {
+    indent: [...(match[1] ?? '')].reduce(
+      (width, character) => width + (character === '\t' ? 4 : 1),
+      0
+    ),
+    ordered: match[3] !== undefined,
+    text: match[4] ?? ''
+  };
 }
 
 function isParagraphContinuation(line: string): boolean {

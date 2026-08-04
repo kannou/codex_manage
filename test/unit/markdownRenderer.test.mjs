@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renderMarkdown } from '../../src/webview/conversation/markdown.ts';
+import {
+  renderMarkdown,
+  renderPlainText
+} from '../../src/webview/conversation/markdown.ts';
 
 class FakeNode {
   constructor(kind, tagName = '') {
@@ -116,6 +119,40 @@ test('keeps HTML executable text inert and rejects unsafe link protocols', () =>
   assert.match(html, /&lt;script&gt;alert\(4\)&lt;\/script&gt;/u);
   assert.match(html, /script\)/u);
   assert.match(html, /relative<\/p>/u);
+});
+
+test('renders nested unordered and mixed lists at their actual hierarchy', () => {
+  const target = render([
+    '* parent',
+    '  * child',
+    '    * grandchild',
+    '* sibling',
+    '',
+    '1. ordered parent',
+    '   - nested unordered',
+    '2. ordered sibling'
+  ].join('\n'));
+  const html = serialize(target);
+
+  assert.match(
+    html,
+    /<ul><li>parent<ul><li>child<ul><li>grandchild<\/li><\/ul><\/li><\/ul><\/li><li>sibling<\/li><\/ul>/u
+  );
+  assert.match(
+    html,
+    /<ol><li>ordered parent<ul><li>nested unordered<\/li><\/ul><\/li><li>ordered sibling<\/li><\/ol>/u
+  );
+});
+
+test('renders user text without interpreting Markdown', () => {
+  globalThis.document = new FakeDocument();
+  const target = document.createElement('div');
+  renderPlainText(target, '**bold**\n* item\n<script>alert(1)</script>');
+
+  assert.equal(
+    serialize(target),
+    '<div>**bold**\n* item\n&lt;script&gt;alert(1)&lt;/script&gt;</div>'
+  );
 });
 
 function render(source) {
