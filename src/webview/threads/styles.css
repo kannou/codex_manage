@@ -366,17 +366,25 @@ button.thread-action:hover {
 
 .conversation-view button.message-bookmark-toggle {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 25px;
-  height: 25px;
+  left: 31px;
+  bottom: -4px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   color: var(--vscode-descriptionForeground);
-  line-height: 23px;
-  background: transparent;
-  border-color: transparent;
+  line-height: 20px;
+  background: var(--vscode-sideBar-background);
+  border: 1px solid var(--vscode-button-border, var(--vscode-widget-border));
+  border-radius: 4px;
+  cursor: pointer;
   opacity: 0;
+  z-index: 1;
+  transform: translateY(50%);
   transition: opacity 80ms ease;
+}
+
+.conversation-view .message-user > button.message-bookmark-toggle {
+  left: 5px;
 }
 
 .conversation-view button.message-bookmark-toggle.is-bookmarked {
