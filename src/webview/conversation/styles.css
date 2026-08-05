@@ -155,10 +155,6 @@ summary:focus-visible {
   border-radius: 8px;
 }
 
-.message.has-bookmark-control .message-text {
-  padding-right: 24px;
-}
-
 .message-user {
   justify-self: end;
   background: var(--vscode-input-background);

@@ -488,7 +488,6 @@ function updateMessageBookmark(
   const current = directChildWithClass(element, 'message-bookmark-toggle');
   if (!enabled) {
     current?.remove();
-    element.classList.remove('has-bookmark-control');
     element.removeAttribute('tabindex');
     return;
   }
@@ -505,7 +504,6 @@ function updateMessageBookmark(
   button.setAttribute('aria-label', bookmarked ? 'Remove bookmark' : 'Bookmark message');
   button.title = bookmarked ? 'Remove bookmark' : 'Bookmark message';
   setTextContent(button, bookmarked ? '★' : '☆');
-  element.classList.add('has-bookmark-control');
   element.tabIndex = -1;
   if (!current) element.append(button);
 }
