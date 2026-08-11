@@ -244,6 +244,10 @@ app.addEventListener('click', (event) => {
     openChangedFile(element);
     return;
   }
+  if (action === 'open-file-link') {
+    openFileLink(element);
+    return;
+  }
   if (action === 'latest') {
     moveToLatestConversationActivity();
     return;
@@ -1243,6 +1247,16 @@ function openChangedFile(element: HTMLElement): void {
     threadId: conversationThreadId,
     turnId,
     fileId
+  });
+}
+
+function openFileLink(element: HTMLElement): void {
+  if (!conversationSessionId || !conversationThreadId || !element.dataset.fileLink) return;
+  vscode.postMessage({
+    type: 'threads/conversation/openFileLink',
+    sessionId: conversationSessionId,
+    threadId: conversationThreadId,
+    fileLink: element.dataset.fileLink
   });
 }
 

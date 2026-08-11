@@ -115,10 +115,30 @@ test('keeps HTML executable text inert and rejects unsafe link protocols', () =>
   assert.equal(html.includes('href="data:'), false);
   assert.equal(html.includes('href="/trusted-looking-path"'), false);
   assert.equal(html.includes('<a '), false);
+  assert.match(
+    html,
+    /<button class="message-file-link" data-action="open-file-link" data-file-link="\/trusted-looking-path">relative<\/button>/u
+  );
   assert.match(html, /&lt;img src=x onerror=&quot;globalThis\.compromised=true&quot;&gt;/u);
   assert.match(html, /&lt;script&gt;alert\(4\)&lt;\/script&gt;/u);
   assert.match(html, /script\)/u);
-  assert.match(html, /relative<\/p>/u);
+  assert.match(html, />relative<\/button><\/p>/u);
+});
+
+test('renders local file links as host-validated actions', () => {
+  const target = render([
+    '[source](/workspace/src/example.ts:12:4)',
+    '[spaced](</workspace/My File.ts#L8>)',
+    '[windows](D:\\workspace\\src\\example.ts:7)',
+    '[root file](README.md:5)'
+  ].join('\n'));
+  const html = serialize(target);
+
+  assert.match(html, /data-file-link="\/workspace\/src\/example\.ts:12:4"/u);
+  assert.match(html, /data-file-link="\/workspace\/My File\.ts#L8"/u);
+  assert.match(html, /data-file-link="D:\\workspace\\src\\example\.ts:7"/u);
+  assert.match(html, /data-file-link="README\.md:5"/u);
+  assert.equal(html.includes('href="/workspace'), false);
 });
 
 test('renders nested unordered and mixed lists at their actual hierarchy', () => {
@@ -168,6 +188,8 @@ function serialize(node) {
   if (node.kind === 'fragment') return children;
   const attributes = [
     node.className ? ['class', node.className] : null,
+    node.dataset.action ? ['data-action', node.dataset.action] : null,
+    node.dataset.fileLink ? ['data-file-link', node.dataset.fileLink] : null,
     node.href ? ['href', node.href] : null,
     node.target ? ['target', node.target] : null,
     node.rel ? ['rel', node.rel] : null

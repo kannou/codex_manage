@@ -278,6 +278,12 @@ export type ThreadsWebviewToHostMessage =
     readonly fileId: string;
   }
   | {
+    readonly type: 'threads/conversation/openFileLink';
+    readonly sessionId: string;
+    readonly threadId: string;
+    readonly fileLink: string;
+  }
+  | {
     readonly type: 'threads/action';
     readonly action: ThreadListAction;
     readonly threadId?: string;
@@ -479,6 +485,17 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
       isBoundedId(value.threadId) &&
       isBoundedId(value.turnId) &&
       isBoundedId(value.fileId)
+    );
+  }
+  if (value.type === 'threads/conversation/openFileLink') {
+    return (
+      hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'fileLink']) &&
+      isBoundedId(value.sessionId) &&
+      isBoundedId(value.threadId) &&
+      typeof value.fileLink === 'string' &&
+      value.fileLink.length > 0 &&
+      value.fileLink.length <= 4_096 &&
+      !/[\0\r\n]/u.test(value.fileLink)
     );
   }
   if (value.type === 'threads/conversation/settings') {

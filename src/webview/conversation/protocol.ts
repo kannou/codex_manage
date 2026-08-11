@@ -13,6 +13,10 @@ export type ConversationWebviewToHostMessage =
     readonly type: 'conversation/openChangedFile';
     readonly turnId: string;
     readonly fileId: string;
+  }
+  | {
+    readonly type: 'conversation/openFileLink';
+    readonly fileLink: string;
   };
 
 export type ConversationHostToWebviewMessage =
@@ -35,10 +39,14 @@ export function isConversationWebviewMessage(value: unknown): value is Conversat
   if (value.type === 'conversation/ready' || value.type === 'conversation/reload') {
     return Object.keys(value).length === 1;
   }
-  return value.type === 'conversation/openChangedFile' &&
-    Object.keys(value).length === 3 &&
-    isBoundedId(value.turnId) &&
-    isBoundedId(value.fileId);
+  if (value.type === 'conversation/openChangedFile') {
+    return Object.keys(value).length === 3 &&
+      isBoundedId(value.turnId) &&
+      isBoundedId(value.fileId);
+  }
+  return value.type === 'conversation/openFileLink' &&
+    Object.keys(value).length === 2 &&
+    isFileLink(value.fileLink);
 }
 
 export function isConversationHostMessage(value: unknown): value is ConversationHostToWebviewMessage {
@@ -60,4 +68,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isBoundedId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 512;
+}
+
+function isFileLink(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 4_096 &&
+    !/[\0\r\n]/u.test(value);
 }

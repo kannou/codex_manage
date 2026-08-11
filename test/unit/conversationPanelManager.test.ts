@@ -201,15 +201,21 @@ test('restores a valid panel and rejects invalid persisted state', async (t) => 
   assert.equal(warnings.length, 1);
 });
 
-test('opens only a current openable workspace file from the loaded turn', async (t) => {
+test('opens only validated changed and linked workspace files', async (t) => {
   (vscode.workspace as unknown as {
     workspaceFolders: Array<{ name: string; uri: { fsPath: string } }>;
   }).workspaceFolders = [{ name: 'workspace', uri: { fsPath: 'D:\\workspace' } }];
   const opened: string[] = [];
+  const selections: Array<{ line: number; character: number } | undefined> = [];
   (vscode.window as unknown as {
-    showTextDocument: (uri: vscode.Uri) => Promise<unknown>;
-  }).showTextDocument = async (uri) => {
+    showTextDocument: (
+      uri: vscode.Uri,
+      options?: { selection?: { start: { line: number; character: number } } }
+    ) => Promise<unknown>;
+  }).showTextDocument = async (uri, options) => {
     opened.push(uri.fsPath);
+    const start = options?.selection?.start;
+    selections.push(start ? { line: start.line, character: start.character } : undefined);
     return {};
   };
   const panels: FakeWebviewPanel[] = [];
@@ -274,7 +280,19 @@ test('opens only a current openable workspace file from the loaded turn', async 
     turnId: 'turn-stale',
     fileId: openable.id
   });
+  panels[0]?.webview.fire({
+    type: 'conversation/openFileLink',
+    fileLink: 'src/example.ts:12:4'
+  });
+  panels[0]?.webview.fire({
+    type: 'conversation/openFileLink',
+    fileLink: 'D:\\outside\\hidden.ts:1'
+  });
   await flushPromises();
 
-  assert.deepEqual(opened, ['D:\\workspace\\src\\example.ts']);
+  assert.deepEqual(opened, [
+    'D:\\workspace\\src\\example.ts',
+    'D:\\workspace\\src\\example.ts'
+  ]);
+  assert.deepEqual(selections, [undefined, { line: 11, character: 3 }]);
 });

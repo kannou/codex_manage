@@ -1,4 +1,4 @@
-const INLINE_TOKEN = /(`[^`\n]+`|\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_)/u;
+const INLINE_TOKEN = /(`[^`\n]+`|\[([^\]]+)\]\((<[^>\n]+>|[^)\s]+)(?:\s+"[^"]*")?\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_)/u;
 
 export function renderMarkdown(target: HTMLElement, source: string): void {
   if (target.dataset.markdownSource === source) {
@@ -203,7 +203,8 @@ function appendInline(parent: HTMLElement, value: string): void {
       code.textContent = token.slice(1, -1);
       parent.append(code);
     } else if (match[2] !== undefined && match[3] !== undefined) {
-      const url = safeLink(match[3]);
+      const target = unwrapLinkTarget(match[3]);
+      const url = safeExternalLink(target);
       if (url) {
         const link = document.createElement('a');
         link.href = url;
@@ -211,6 +212,15 @@ function appendInline(parent: HTMLElement, value: string): void {
         link.rel = 'noreferrer noopener';
         appendInline(link, match[2]);
         parent.append(link);
+      } else if (isFileLinkTarget(target)) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'message-file-link';
+        button.dataset.action = 'open-file-link';
+        button.dataset.fileLink = target;
+        button.title = `Open ${target}`;
+        appendInline(button, match[2]);
+        parent.append(button);
       } else {
         appendText(parent, match[2]);
       }
@@ -233,11 +243,25 @@ function appendText(parent: HTMLElement, value: string): void {
   });
 }
 
-function safeLink(value: string): string | null {
+function unwrapLinkTarget(value: string): string {
+  return value.startsWith('<') && value.endsWith('>') ? value.slice(1, -1) : value;
+}
+
+function safeExternalLink(value: string): string | null {
   try {
     const url = new URL(value);
     return ['https:', 'http:', 'mailto:'].includes(url.protocol) ? url.href : null;
   } catch {
     return null;
   }
+}
+
+function isFileLinkTarget(value: string): boolean {
+  if (!value || value.length > 4_096 || /[\0\r\n]/u.test(value) || value.startsWith('#')) {
+    return false;
+  }
+  if (/^[a-z]:[\\/]/iu.test(value) || value.startsWith('\\\\')) return true;
+  if (/^(?:javascript|data|vbscript|file|command|vscode):/iu.test(value)) return false;
+  const path = value.replace(/(?:#L\d+(?:C\d+)?|:\d+(?::\d+)?)$/iu, '');
+  return !/^[a-z][a-z\d+.-]*:/iu.test(path) && !path.startsWith('//');
 }

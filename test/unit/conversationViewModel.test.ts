@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ThreadItem } from '../../src/codex/protocol/generated/v2/ThreadItem';
+import { resolveConversationFileLink } from '../../src/conversation/conversationChangedFiles';
 import { toConversationViewModel } from '../../src/conversation/conversationViewModel';
 import { createThread, createTurn } from '../support/threadFixture';
 
@@ -327,6 +328,46 @@ test('reports interrupted and declined work in the collapsed heading', () => {
   assert.deepEqual(interrupted.turns[0]?.workDetails, { count: 1, status: 'Interrupted' });
   assert.deepEqual(declined.turns[0]?.workDetails, { count: 1, status: 'Declined' });
   assert.equal(messagesOnly.turns[0]?.workDetails, null);
+});
+
+test('resolves workspace file links with optional line and column locations', () => {
+  const folders = [{ path: '/workspace' }];
+
+  assert.deepEqual(
+    resolveConversationFileLink('src/example.ts:12:4', '/workspace', folders),
+    { absolutePath: '/workspace/src/example.ts', line: 12, column: 4 }
+  );
+  assert.deepEqual(
+    resolveConversationFileLink('/workspace/src/example.ts#L8C2', '/workspace', folders),
+    { absolutePath: '/workspace/src/example.ts', line: 8, column: 2 }
+  );
+  assert.deepEqual(
+    resolveConversationFileLink('README.md:5', '/workspace', folders),
+    { absolutePath: '/workspace/README.md', line: 5 }
+  );
+  assert.deepEqual(
+    resolveConversationFileLink('D:\\workspace\\src\\example.ts:7', 'D:\\workspace', [
+      { path: 'D:\\workspace' }
+    ]),
+    { absolutePath: 'D:\\workspace\\src\\example.ts', line: 7 }
+  );
+});
+
+test('rejects file links outside the current workspace', () => {
+  const folders = [{ path: '/workspace' }];
+
+  assert.equal(
+    resolveConversationFileLink('/private/secret.txt:1', '/workspace', folders),
+    undefined
+  );
+  assert.equal(
+    resolveConversationFileLink('../secret.txt:1', '/workspace', folders),
+    undefined
+  );
+  assert.equal(
+    resolveConversationFileLink('src/example.ts:0', '/workspace', folders),
+    undefined
+  );
 });
 
 test('lists completed workspace file changes once with safe relative paths', () => {
