@@ -56,6 +56,28 @@ interface ResolvedWorkspacePath {
   readonly displayPath: string;
 }
 
+export interface ResolvedConversationFileLink {
+  readonly absolutePath: string;
+  readonly line?: number;
+  readonly column?: number;
+}
+
+export function resolveConversationFileLink(
+  target: string,
+  cwd: string,
+  workspaceFolders: readonly ConversationWorkspaceFolder[]
+): ResolvedConversationFileLink | undefined {
+  const parsed = parseFileLinkTarget(target);
+  if (!parsed) return undefined;
+  const resolved = resolveWorkspacePath(parsed.path, cwd, workspaceFolders);
+  if (!resolved) return undefined;
+  return {
+    absolutePath: resolved.absolutePath,
+    ...(parsed.line === undefined ? {} : { line: parsed.line }),
+    ...(parsed.column === undefined ? {} : { column: parsed.column })
+  };
+}
+
 function resolveWorkspacePath(
   rawPath: string,
   cwd: string,
@@ -94,6 +116,32 @@ function resolveWorkspacePath(
     key: pathApi === win32 ? absolutePath.toLowerCase() : absolutePath,
     absolutePath,
     displayPath: workspaceFolders.length > 1 ? `${folderName}/${relativePath}` : relativePath
+  };
+}
+
+function parseFileLinkTarget(
+  target: string
+): { readonly path: string; readonly line?: number; readonly column?: number } | undefined {
+  if (!target || target.length > 4_096 || target.includes('\0')) return undefined;
+  const hashLocation = /^(.*)#L(\d+)(?:C(\d+))?$/iu.exec(target);
+  const colonLocation = /^(.*):(\d+):(\d+)$/u.exec(target) ??
+    /^(.*):(\d+)$/u.exec(target);
+  const location = hashLocation ?? colonLocation;
+  if (!location) return { path: target };
+  const path = location[1] ?? '';
+  const line = Number(location[2]);
+  const column = location[3] === undefined ? undefined : Number(location[3]);
+  if (
+    !path || !Number.isSafeInteger(line) || line < 1 || line > 10_000_000 ||
+    (column !== undefined &&
+      (!Number.isSafeInteger(column) || column < 1 || column > 10_000_000))
+  ) {
+    return undefined;
+  }
+  return {
+    path,
+    line,
+    ...(column === undefined ? {} : { column })
   };
 }
 

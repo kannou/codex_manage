@@ -1524,13 +1524,19 @@ test('maps legacy turn bookmarks to first messages and bookmarks individual resp
   assert.equal(writes.length, 2);
 });
 
-test('opens a validated changed file and rejects stale or unknown file requests', async (t) => {
+test('opens validated changed and linked files and rejects unsafe requests', async (t) => {
   setWorkspace();
   const opened: string[] = [];
+  const selections: Array<{ line: number; character: number } | undefined> = [];
   (vscode.window as unknown as {
-    showTextDocument: (uri: vscode.Uri) => Promise<unknown>;
-  }).showTextDocument = async (uri) => {
+    showTextDocument: (
+      uri: vscode.Uri,
+      options?: { selection?: { start: { line: number; character: number } } }
+    ) => Promise<unknown>;
+  }).showTextDocument = async (uri, options) => {
     opened.push(uri.fsPath);
+    const start = options?.selection?.start;
+    selections.push(start ? { line: start.line, character: start.character } : undefined);
     return {};
   };
   const fileChange: ThreadItem = {
@@ -1593,9 +1599,25 @@ test('opens a validated changed file and rejects stale or unknown file requests'
     turnId: 'turn-files',
     fileId: 'changed-file-unknown'
   });
+  view.webview.fire({
+    type: 'threads/conversation/openFileLink',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    fileLink: 'src/example.ts#L9C2'
+  });
+  view.webview.fire({
+    type: 'threads/conversation/openFileLink',
+    sessionId: loaded.state.sessionId,
+    threadId: 'thread-1',
+    fileLink: 'D:\\outside\\hidden.ts:1'
+  });
   await flushPromises();
 
-  assert.deepEqual(opened, ['D:\\workspace\\src\\example.ts']);
+  assert.deepEqual(opened, [
+    'D:\\workspace\\src\\example.ts',
+    'D:\\workspace\\src\\example.ts'
+  ]);
+  assert.deepEqual(selections, [undefined, { line: 8, character: 1 }]);
 });
 
 test('sends, streams, and stops only the active sidebar conversation', async (t) => {

@@ -17,6 +17,7 @@ import {
   resolveConversationChangedFiles,
   type ConversationWorkspaceFolder
 } from './conversationChangedFiles';
+import { openConversationFileLink } from './conversationFileLink';
 
 export const CONVERSATION_VIEW_TYPE = 'codexThreadManager.conversation';
 
@@ -142,6 +143,10 @@ class ManagedConversationPanel {
           void this.openChangedFile(message.turnId, message.fileId);
           return;
         }
+        if (message.type === 'conversation/openFileLink') {
+          void this.openFileLink(message.fileLink);
+          return;
+        }
         this.ready = true;
         this.reload();
       }),
@@ -217,6 +222,21 @@ class ManagedConversationPanel {
     } catch (error) {
       this.options.logger.appendLine(
         `[conversation] Could not open a changed file for thread ${this.reference.id}: ${asError(error).message}`
+      );
+    }
+  }
+
+  private async openFileLink(target: string): Promise<void> {
+    if (!this.thread) return;
+    try {
+      await openConversationFileLink(
+        target,
+        this.thread.cwd,
+        currentConversationWorkspaceFolders()
+      );
+    } catch (error) {
+      this.options.logger.appendLine(
+        `[conversation] Could not open a linked file for thread ${this.reference.id}: ${asError(error).message}`
       );
     }
   }

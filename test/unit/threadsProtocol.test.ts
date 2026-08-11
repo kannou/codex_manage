@@ -308,6 +308,18 @@ test('accepts bounded composer actions and rejects arbitrary conversation payloa
     itemId: 'message-1',
     bookmarked: true
   }), false);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/openFileLink',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    fileLink: 'src/example.ts:12'
+  }), true);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/conversation/openFileLink',
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    fileLink: '/private/file.ts\0'
+  }), false);
 
   for (const text of ['', ' \n\t', 'x'.repeat(MAX_COMPOSER_TEXT_LENGTH + 1)]) {
     assert.equal(isThreadsWebviewMessage({

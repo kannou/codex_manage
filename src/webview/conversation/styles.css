@@ -206,8 +206,20 @@ summary:focus-visible {
   border-radius: 4px;
 }
 .message-text code { font-family: var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background); }
-.message-text a { color: var(--vscode-textLink-foreground); }
-.message-text a:hover { color: var(--vscode-textLink-activeForeground); }
+.message-text a,
+.message-file-link { color: var(--vscode-textLink-foreground); }
+.message-file-link {
+  padding: 0;
+  font: inherit;
+  text-align: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.message-text a:hover,
+.message-file-link:hover { color: var(--vscode-textLink-activeForeground); }
+.message-file-link:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 
 .activity-card {
   display: block;

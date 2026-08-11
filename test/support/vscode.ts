@@ -46,6 +46,28 @@ export enum ViewColumn {
   One = 1
 }
 
+export class Position {
+  public constructor(
+    public readonly line: number,
+    public readonly character: number
+  ) {}
+}
+
+export class Range {
+  public readonly start: Position;
+  public readonly end: Position;
+
+  public constructor(
+    startLine: number,
+    startCharacter: number,
+    endLine: number,
+    endCharacter: number
+  ) {
+    this.start = new Position(startLine, startCharacter);
+    this.end = new Position(endLine, endCharacter);
+  }
+}
+
 export class Uri {
   private constructor(
     public readonly fsPath: string,

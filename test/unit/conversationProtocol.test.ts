@@ -39,6 +39,18 @@ test('rejects arbitrary webview commands and malformed host messages', () => {
     path: '/private/file'
   }), false);
   assert.equal(isConversationWebviewMessage({
+    type: 'conversation/openFileLink',
+    fileLink: 'src/example.ts:12:4'
+  }), true);
+  assert.equal(isConversationWebviewMessage({
+    type: 'conversation/openFileLink',
+    fileLink: 'src/example.ts\nanything'
+  }), false);
+  assert.equal(isConversationWebviewMessage({
+    type: 'conversation/openFileLink',
+    fileLink: 'x'.repeat(4_097)
+  }), false);
+  assert.equal(isConversationWebviewMessage({
     type: 'conversation/execute',
     command: 'anything'
   }), false);

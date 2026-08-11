@@ -62,6 +62,7 @@ import {
 import type { ConnectionStatus } from './threadTreeProvider';
 import { extractFencedCodeBlocks } from '../conversation/fencedCode';
 import type { ConversationWorkspaceFolder } from '../conversation/conversationChangedFiles';
+import { openConversationFileLink } from '../conversation/conversationFileLink';
 import type { GetAccountRateLimitsResponse } from '../codex/protocol/generated/v2/GetAccountRateLimitsResponse';
 import { parseRateLimitSnapshot } from '../codex/protocol/guards';
 
@@ -416,6 +417,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
           case 'threads/conversation/openChangedFile':
             void this.openConversationChangedFile(message);
             return;
+          case 'threads/conversation/openFileLink':
+            void this.openConversationFileLink(message);
+            return;
           case 'threads/action':
             this.executeAction(message.action, message.threadId);
         }
@@ -526,6 +530,28 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     } catch (error) {
       this.options.logger.appendLine(
         `[threads] Could not open a changed file for sidebar thread ${message.threadId}: ${asError(error).message}`
+      );
+    }
+  }
+
+  private async openConversationFileLink(
+    message: Extract<
+      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      { type: 'threads/conversation/openFileLink' }
+    >
+  ): Promise<void> {
+    if (!this.isCurrentSession(message.sessionId, message.threadId)) return;
+    const cwd = this.conversationSession?.snapshot().model.cwd;
+    if (!cwd) return;
+    try {
+      await openConversationFileLink(
+        message.fileLink,
+        cwd,
+        currentConversationWorkspaceFolders()
+      );
+    } catch (error) {
+      this.options.logger.appendLine(
+        `[threads] Could not open a linked file for sidebar thread ${message.threadId}: ${asError(error).message}`
       );
     }
   }

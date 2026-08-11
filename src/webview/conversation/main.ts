@@ -36,9 +36,15 @@ reloadButton.addEventListener('click', () => {
 });
 
 target.content.addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLElement>(
-    '[data-action="open-changed-file"]'
-  );
+  const button = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
+  if (button?.dataset.action === 'open-file-link' && button.dataset.fileLink) {
+    vscode.postMessage({
+      type: 'conversation/openFileLink',
+      fileLink: button.dataset.fileLink
+    });
+    return;
+  }
+  if (button?.dataset.action !== 'open-changed-file') return;
   const turnId = button?.dataset.turnId;
   const fileId = button?.dataset.fileId;
   if (turnId && fileId) {
