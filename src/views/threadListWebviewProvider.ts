@@ -2000,9 +2000,9 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     );
     session.initializeRuntimeSettings(
       draft.models,
-      started.model,
-      started.reasoningEffort,
-      started.serviceTier,
+      draft.runtime.model ?? started.model,
+      draft.runtime.effort,
+      draft.runtime.serviceTier,
       draft.runtime.sandbox,
       started.approvalPolicy,
       started.approvalsReviewer

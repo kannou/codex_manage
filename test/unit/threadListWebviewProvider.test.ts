@@ -380,6 +380,19 @@ test('creates one conversation from the first message and transitions to its run
     }
   });
   view.webview.fire({
+    type: 'threads/conversation/settings',
+    sessionId,
+    threadId: draftId,
+    settings: {
+      model: compatibleModel.id,
+      effort: 'high',
+      serviceTier: 'priority',
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      approvalsReviewer: 'auto_review'
+    }
+  });
+  view.webview.fire({
     type: 'threads/conversation/send',
     sessionId,
     threadId: draftId,
@@ -408,19 +421,23 @@ test('creates one conversation from the first message and transitions to its run
     threadSource: 'codex-thread-manager'
   });
   assert.equal((turnStarts[0] as { threadId?: unknown }).threadId, 'thread-created');
-  assert.equal((turnStarts[0] as { effort?: unknown }).effort, 'medium');
+  assert.equal((turnStarts[0] as { effort?: unknown }).effort, 'high');
   assert.equal((turnStarts[0] as { approvalsReviewer?: unknown }).approvalsReviewer, 'auto_review');
   assert.deepEqual(created, ['thread-created']);
   const transition = view.webview.postedMessages.find(
     (message) => (message as { type?: unknown }).type === 'threads/conversationCreated'
   ) as {
     previousThreadId: string;
-    state: { model: { threadId: string }; runtime: { status: string; model: string | null } };
+    state: {
+      model: { threadId: string };
+      runtime: { status: string; model: string | null; effort: string | null };
+    };
   } | undefined;
   assert.equal(transition?.previousThreadId, draftId);
   assert.equal(transition?.state.model.threadId, 'thread-created');
   assert.equal(transition?.state.runtime.status, 'ready');
-  assert.equal(transition?.state.runtime.model, 'gpt-fixture');
+  assert.equal(transition?.state.runtime.model, compatibleModel.id);
+  assert.equal(transition?.state.runtime.effort, 'high');
   const result = view.webview.postedMessages.find(
     (message) => (message as { requestId?: unknown }).requestId === 'create-1'
   ) as { outcome?: unknown; threadId?: unknown } | undefined;
