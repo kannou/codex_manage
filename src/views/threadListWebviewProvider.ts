@@ -236,6 +236,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
   private readonly interactions = new Map<string, ParsedConversationInteraction>();
   private conversationSession: ConversationSession | undefined;
   private newConversationDraft: NewConversationDraft | undefined;
+  private newConversationDraftText = '';
   private conversationSessionId: string | undefined;
   private conversationSubscription: { dispose(): void } | undefined;
   private pendingConversationLoad: PendingConversationLoad | undefined;
@@ -1023,7 +1024,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       runtimeLoadVersion: 0,
       createPending: false,
       createdThread: undefined,
-      text: '',
+      text: this.newConversationDraftText,
       attachments: [],
       notifications: [],
       overflowed: false,
@@ -1199,6 +1200,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       draft.draftId === threadId
     ) {
       draft.text = text ?? '';
+      this.newConversationDraftText = draft.text;
       this.createNewConversation(draft, requestId, text ?? '');
       return;
     }
@@ -1270,7 +1272,10 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
     if (!this.isCurrentSession(sessionId, threadId)) return;
     const draft = this.newConversationDraft;
     if (draft?.sessionId === sessionId && draft.draftId === threadId) {
-      if (!draft.createPending) draft.text = text;
+      if (!draft.createPending) {
+        draft.text = text;
+        this.newConversationDraftText = text;
+      }
       return;
     }
     this.restoreConversationDraft(threadId).text = text;
@@ -2027,6 +2032,7 @@ export class ThreadListWebviewProvider implements vscode.WebviewViewProvider, vs
       this.conversationDrafts.set(thread.id, conversationDraft);
     }
     this.newConversationDraft = undefined;
+    this.newConversationDraftText = '';
     this.activeThread = { id: thread.id, title: conversationTitle(thread) };
     this.attachConversationSession(
       session,
