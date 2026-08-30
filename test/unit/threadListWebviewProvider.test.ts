@@ -1257,6 +1257,53 @@ test('keeps a new-conversation draft after creation failure and isolates a late 
   ), false);
 });
 
+test('restores a new-conversation prompt after returning to the thread list', async (t) => {
+  setWorkspace();
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: {
+      ...fakeConversationClient(async (threadId) => createThread({ id: threadId })),
+      listModels: async () => ({ data: [runtimeModel()], nextCursor: null })
+    },
+    startThread: async () => startResponse(createThread({ id: 'thread-created' })),
+    readConversationConfig: async () => ({
+      model: 'gpt-fixture', reasoningEffort: null, serviceTier: null,
+      sandbox: null, approvalPolicy: null, approvalsReviewer: null
+    }),
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => provider.dispose());
+  provider.setSnapshot(snapshot());
+  provider.setConnectionStatus({ kind: 'ready' });
+  const view = new FakeWebviewView();
+  resolveProvider(provider, view);
+  view.webview.fire({ type: 'threads/ready' });
+  view.webview.fire({ type: 'threads/new' });
+  await flushPromises();
+
+  const first = [...view.webview.postedMessages].reverse().find(
+    (message) => (message as { state?: { runtime?: { status?: unknown } } }).state?.runtime?.status === 'ready'
+  ) as { state: { sessionId: string; model: { threadId: string } } };
+  view.webview.fire({
+    type: 'threads/conversation/draft/update',
+    sessionId: first.state.sessionId,
+    threadId: first.state.model.threadId,
+    text: 'Do not lose this prompt'
+  });
+  view.webview.fire({ type: 'threads/back' });
+  view.webview.fire({ type: 'threads/new' });
+  await flushPromises();
+
+  const restored = [...view.webview.postedMessages].reverse().find(
+    (message) => (
+      (message as { type?: unknown; state?: { runtime?: { status?: unknown } } }).type ===
+        'threads/conversationState' &&
+      (message as { state: { runtime: { status: string } } }).state.runtime.status === 'ready'
+    )
+  ) as { state: { draftText: string } };
+  assert.equal(restored.state.draftText, 'Do not lose this prompt');
+});
+
 test('keeps a new-conversation draft unavailable across disconnect and reloads its runtime after reconnect', async (t) => {
   setWorkspace();
   let configReads = 0;
