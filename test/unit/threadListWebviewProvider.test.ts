@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import * as vscode from 'vscode';
 import type { Thread } from '../../src/codex/protocol/generated/v2/Thread';
 import type { ThreadResumeResponse } from '../../src/codex/protocol/generated/v2/ThreadResumeResponse';
@@ -13,11 +13,28 @@ import type { ThreadItem } from '../../src/codex/protocol/generated/v2/ThreadIte
 import type { ThreadDisplayModel, ThreadRepositorySnapshot } from '../../src/codex/threadRepository';
 import type { ConversationSessionClient } from '../../src/conversation/conversationSession';
 import type { ConversationBookmark } from '../../src/state/turnBookmarkStore';
+import { ThreadListWebviewProvider } from '../../src/views/threadListWebviewProvider';
 import {
+  ConversationCoordinator,
   calculateContextWindowUsage,
-  ThreadListWebviewProvider
-} from '../../src/views/threadListWebviewProvider';
+  type ConversationCoordinatorOptions
+} from '../../src/conversation/conversationCoordinator';
 import { createThread, createTurn } from '../support/threadFixture';
+
+function createProvider(
+  t: TestContext,
+  options: ConversationCoordinatorOptions & { readonly extensionUri: vscode.Uri }
+): { provider: ThreadListWebviewProvider; coordinator: ConversationCoordinator } {
+  const coordinator = new ConversationCoordinator(options);
+  t.after(() => coordinator.dispose());
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: options.extensionUri,
+    coordinator,
+    readReduceMotion: options.readReduceMotion,
+    logger: options.logger
+  });
+  return { provider, coordinator };
+}
 
 type Listener<T> = (event: T) => unknown;
 
@@ -27,6 +44,7 @@ class FakeWebview {
   public html = '';
   public readonly postedMessages: unknown[] = [];
   private readonly listeners = new Set<Listener<unknown>>();
+  private readonly postListeners = new Set<Listener<unknown>>();
 
   public asWebviewUri(uri: vscode.Uri): vscode.Uri {
     return vscode.Uri.file(`webview${uri.fsPath}`);
@@ -39,7 +57,25 @@ class FakeWebview {
 
   public async postMessage(message: unknown): Promise<boolean> {
     this.postedMessages.push(message);
+    for (const listener of this.postListeners) listener(message);
     return true;
+  }
+
+  public waitForMessage(predicate: (message: unknown) => boolean): Promise<void> {
+    if (this.postedMessages.some(predicate)) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const listener = (message: unknown) => {
+        if (!predicate(message)) return;
+        clearTimeout(timer);
+        this.postListeners.delete(listener);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        this.postListeners.delete(listener);
+        reject(new Error('Timed out waiting for a Webview message.'));
+      }, 2_000);
+      this.postListeners.add(listener);
+    });
   }
 
   public fire(message: unknown): void {
@@ -257,15 +293,15 @@ test('posts a primitive-only list model and a secure Webview shell after ready',
   setWorkspace();
   const logs: string[] = [];
   let reduceMotion: 'auto' | 'on' | 'off' = 'off';
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async () => createThread()),
     readReduceMotion: () => reduceMotion,
     logger: { appendLine: (value) => logs.push(value) }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
 
   resolveProvider(provider, view);
@@ -281,7 +317,7 @@ test('posts a primitive-only list model and a secure Webview shell after ready',
   assert.equal(view.webview.html.includes('unsafe-inline'), false);
 
   reduceMotion = 'on';
-  provider.refreshReduceMotion();
+  coordinator.refreshReduceMotion();
   assert.deepEqual(view.webview.postedMessages.at(-1), {
     type: 'threads/reduceMotion',
     preference: 'on'
@@ -333,7 +369,7 @@ test('creates one conversation from the first message and transitions to its run
       };
     }
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     startThread: async (params) => {
@@ -352,8 +388,8 @@ test('creates one conversation from the first message and transitions to its run
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot());
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot());
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -457,7 +493,7 @@ test('selects, deduplicates, removes, and restores local images without exposing
       throw new Error('first message failed');
     }
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     startThread: async () => startResponse(createThread({ id: 'thread-with-image' })),
@@ -469,8 +505,8 @@ test('selects, deduplicates, removes, and restores local images without exposing
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot());
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot());
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -550,7 +586,7 @@ test('adds host-selected file references and Skills and restores them after a fa
       throw new Error('first message failed');
     }
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     startThread: async () => startResponse(createThread({ id: 'thread-with-context' })),
@@ -571,8 +607,8 @@ test('adds host-selected file references and Skills and restores them after a fa
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot());
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot());
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -730,14 +766,14 @@ test('searches and selects correlated file and Skill suggestions without accepti
       }]
     })
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -801,8 +837,10 @@ test('searches and selects correlated file and Skill suggestions without accepti
     requestId: 'file-new',
     suggestionId: fileSuggestionId
   });
-  await flushPromises();
-  await flushPromises();
+  await view.webview.waitForMessage((message) =>
+    (message as { type?: unknown }).type === 'threads/conversationSuggestionSelection' &&
+    (message as { suggestionId?: unknown }).suggestionId === fileSuggestionId
+  );
   assert.equal(view.webview.postedMessages.some((message) =>
     (message as { type?: unknown; outcome?: unknown; suggestionId?: unknown }).type ===
       'threads/conversationSuggestionSelection' &&
@@ -998,7 +1036,7 @@ test('restores isolated per-thread drafts and clears them only after an accepted
       };
     }
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     pickLocalImages: async () => [{ path: imagePath, sizeBytes: 3 }],
@@ -1007,7 +1045,7 @@ test('restores isolated per-thread drafts and clears them only after an accepted
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(
+  coordinator.setSnapshot(snapshot(
     displayThread('thread-1', 'Thread 1'),
     displayThread('thread-2', 'Thread 2')
   ));
@@ -1133,7 +1171,7 @@ test('drops unavailable draft attachments and archived-thread drafts with a safe
   const mentionPath = join(draftDirectory, 'temporary.txt');
   writeFileSync(mentionPath, 'temporary context');
 
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
     pickMentionFiles: async () => [{ path: mentionPath, sizeBytes: 17 }],
@@ -1141,7 +1179,7 @@ test('drops unavailable draft attachments and archived-thread drafts with a safe
   });
   t.after(() => provider.dispose());
   const activeThread = displayThread('thread-1', 'Thread 1');
-  provider.setSnapshot(snapshot(activeThread));
+  coordinator.setSnapshot(snapshot(activeThread));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1176,8 +1214,8 @@ test('drops unavailable draft attachments and archived-thread drafts with a safe
   assert.equal(JSON.stringify(withoutMissingFile).includes(draftDirectory), false);
 
   view.webview.fire({ type: 'threads/back' });
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1', { archived: true })));
-  provider.setSnapshot(snapshot(activeThread));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1', { archived: true })));
+  coordinator.setSnapshot(snapshot(activeThread));
   view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
   await flushPromises();
   const afterArchive = [...view.webview.postedMessages].reverse().find(
@@ -1200,7 +1238,7 @@ test('keeps a new-conversation draft after creation failure and isolates a late 
     }
   };
   let rejectCreation = true;
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     startThread: async () => {
@@ -1214,8 +1252,8 @@ test('keeps a new-conversation draft after creation failure and isolates a late 
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot());
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot());
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1259,7 +1297,7 @@ test('keeps a new-conversation draft after creation failure and isolates a late 
 
 test('restores a new-conversation prompt after returning to the thread list', async (t) => {
   setWorkspace();
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: {
       ...fakeConversationClient(async (threadId) => createThread({ id: threadId })),
@@ -1273,8 +1311,8 @@ test('restores a new-conversation prompt after returning to the thread list', as
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot());
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot());
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1307,7 +1345,7 @@ test('restores a new-conversation prompt after returning to the thread list', as
 test('keeps a new-conversation draft unavailable across disconnect and reloads its runtime after reconnect', async (t) => {
   setWorkspace();
   let configReads = 0;
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: {
       ...fakeConversationClient(async (threadId) => createThread({ id: threadId })),
@@ -1324,8 +1362,8 @@ test('keeps a new-conversation draft unavailable across disconnect and reloads i
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot());
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot());
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1333,8 +1371,8 @@ test('keeps a new-conversation draft unavailable across disconnect and reloads i
   await flushPromises();
   assert.equal(configReads, 1);
 
-  provider.setConnectionStatus({ kind: 'error', message: 'Disconnected' });
-  provider.markConversationDisconnected();
+  coordinator.setConnectionStatus({ kind: 'error', message: 'Disconnected' });
+  coordinator.markConversationDisconnected();
   const unavailable = [...view.webview.postedMessages].reverse().find(
     (message) => (
       (message as { type?: unknown }).type === 'threads/conversationState' &&
@@ -1343,7 +1381,7 @@ test('keeps a new-conversation draft unavailable across disconnect and reloads i
   );
   assert.ok(unavailable);
 
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setConnectionStatus({ kind: 'ready' });
   await flushPromises();
   assert.equal(configReads, 2);
   const restored = [...view.webview.postedMessages].reverse().find(
@@ -1358,7 +1396,7 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
   let refreshes = 0;
   let messagesAtRefresh: unknown[] = [];
   let view: FakeWebviewView;
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => {
       reads.push(threadId);
@@ -1375,7 +1413,7 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1394,7 +1432,7 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
   );
 
   view.webview.postedMessages.length = 0;
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Renamed while open')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Renamed while open')));
   assert.deepEqual(view.webview.postedMessages, []);
 
   view.webview.fire({ type: 'threads/back' });
@@ -1413,7 +1451,7 @@ test('opens history in the sidebar, keeps it during snapshot updates, and return
 test('renames only the active conversation and publishes the updated title', async (t) => {
   setWorkspace();
   const renames: Array<{ threadId: string; name: string }> = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
     renameConversationThread: async (threadId, name) => {
@@ -1422,7 +1460,7 @@ test('renames only the active conversation and publishes the updated title', asy
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1459,7 +1497,7 @@ test('maps legacy turn bookmarks to first messages and bookmarks individual resp
     bookmarked: boolean;
     removeLegacyTurnBookmark: boolean;
   }> = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     turnBookmarkStore: {
       getBookmarks: (threadId) => bookmarks.get(threadId) ?? [],
@@ -1522,7 +1560,7 @@ test('maps legacy turn bookmarks to first messages and bookmarks individual resp
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1612,7 +1650,7 @@ test('opens validated changed and linked files and rejects unsafe requests', asy
     ],
     status: 'completed'
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => createThread({
       id: threadId,
@@ -1621,7 +1659,7 @@ test('opens validated changed and linked files and rejects unsafe requests', asy
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1703,13 +1741,13 @@ test('sends, streams, and stops only the active sidebar conversation', async (t)
     },
     listModels: async () => ({ data: [], nextCursor: null })
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     logger: { appendLine: (value) => logs.push(value) }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1781,7 +1819,7 @@ test('sends, streams, and stops only the active sidebar conversation', async (t)
   );
   assert.ok(runningStateIndex >= 0 && runningStateIndex < acceptedSendIndex);
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'item/agentMessage/delta',
     params: {
       threadId: 'thread-1',
@@ -1805,7 +1843,7 @@ test('sends, streams, and stops only the active sidebar conversation', async (t)
   await flushPromises();
   assert.deepEqual(interruptCalls, [{ threadId: 'thread-1', turnId: 'turn-live' }]);
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: {
       threadId: 'thread-1',
@@ -1843,7 +1881,7 @@ test('sends, streams, and stops only the active sidebar conversation', async (t)
 test('restores the active conversation when the Webview context sends ready again', async (t) => {
   setWorkspace();
   const reads: string[] = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => {
       reads.push(threadId);
@@ -1852,7 +1890,7 @@ test('restores the active conversation when the Webview context sends ready agai
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -1875,19 +1913,19 @@ test('restores the active conversation when the Webview context sends ready agai
 test('replays conversation notifications received while the initial history read is pending', async (t) => {
   setWorkspace();
   const read = deferred<Thread>();
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async () => read.promise),
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
   view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: {
       threadId: 'thread-1',
@@ -1904,7 +1942,7 @@ test('replays conversation notifications received while the initial history read
       })
     }
   });
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'thread/status/changed',
     params: { threadId: 'thread-1', status: { type: 'idle' } }
   });
@@ -1932,7 +1970,7 @@ test('replays conversation notifications received while the initial history read
 
 test('shows a completion badge only when the active conversation is not being viewed', async (t) => {
   setWorkspace();
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => createThread({
       id: threadId,
@@ -1948,7 +1986,7 @@ test('shows a completion badge only when the active conversation is not being vi
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/viewFocus', focused: true });
@@ -1961,7 +1999,7 @@ test('shows a completion badge only when the active conversation is not being vi
   )) as { state: { sessionId: string } } | undefined;
   assert.ok(loaded);
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: {
       threadId: 'thread-1',
@@ -1980,7 +2018,7 @@ test('shows a completion badge only when the active conversation is not being vi
   assert.equal(view.badge, undefined);
 
   view.webview.fire({ type: 'threads/viewFocus', focused: false });
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: {
       threadId: 'thread-1',
@@ -2012,7 +2050,7 @@ test('shows a completion badge only when the active conversation is not being vi
   });
   assert.equal(view.badge, undefined);
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: {
       threadId: 'thread-1',
@@ -2028,7 +2066,7 @@ test('tracks unseen completions by thread and clears only the reviewed thread', 
     ['thread-1', 'turn-1'],
     ['thread-2', 'turn-2']
   ]);
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => createThread({
       id: threadId,
@@ -2037,7 +2075,7 @@ test('tracks unseen completions by thread and clears only the reviewed thread', 
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(
+  coordinator.setSnapshot(snapshot(
     displayThread('thread-1', 'Thread 1'),
     displayThread('thread-2', 'Thread 2')
   ));
@@ -2048,7 +2086,7 @@ test('tracks unseen completions by thread and clears only the reviewed thread', 
 
   view.setVisible(false);
   for (const [threadId, turnId] of completedTurns) {
-    provider.handleNotification({
+    coordinator.handleNotification({
       method: 'turn/completed',
       params: { threadId, turn: createTurn({ id: turnId }) }
     });
@@ -2113,26 +2151,26 @@ test('tracks unseen completions by thread and clears only the reviewed thread', 
 
 test('does not retain completion badges for threads outside the current list', async (t) => {
   setWorkspace();
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
   const knownThread = displayThread('thread-1', 'Thread 1');
-  provider.setSnapshot(snapshot(knownThread));
+  coordinator.setSnapshot(snapshot(knownThread));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/viewFocus', focused: false });
   view.webview.fire({ type: 'threads/ready' });
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: { threadId: 'thread-outside-workspace', turn: createTurn({ id: 'turn-foreign' }) }
   });
   assert.equal(view.badge, undefined);
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: { threadId: 'thread-1', turn: createTurn({ id: 'turn-known' }) }
   });
@@ -2141,13 +2179,13 @@ test('does not retain completion badges for threads outside the current list', a
     tooltip: '1 completed conversation to review'
   });
 
-  provider.setSnapshot(snapshot());
+  coordinator.setSnapshot(snapshot());
   assert.equal(view.badge, undefined);
 });
 
 test('shows a completion badge when a sent turn finishes after returning to the list', async (t) => {
   setWorkspace();
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: {
       ...fakeConversationClient(async (threadId) => createThread({ id: threadId })),
@@ -2164,7 +2202,7 @@ test('shows a completion badge when a sent turn finishes after returning to the 
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/viewFocus', focused: true });
@@ -2184,7 +2222,7 @@ test('shows a completion badge when a sent turn finishes after returning to the 
   });
   await flushPromises();
   view.webview.fire({ type: 'threads/back' });
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: { threadId: 'thread-1', turn: createTurn({ id: 'turn-background' }) }
   });
@@ -2198,7 +2236,7 @@ test('shows a completion badge when a sent turn finishes after returning to the 
 test('automatically posts authoritative items when a completed turn notification omits details', async (t) => {
   setWorkspace();
   let readCalls = 0;
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => {
       readCalls += 1;
@@ -2221,7 +2259,7 @@ test('automatically posts authoritative items when a completed turn notification
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -2229,7 +2267,7 @@ test('automatically posts authoritative items when a completed turn notification
   await flushPromises();
   view.webview.postedMessages.length = 0;
 
-  provider.handleNotification({
+  coordinator.handleNotification({
     method: 'turn/completed',
     params: {
       threadId: 'thread-1',
@@ -2265,13 +2303,13 @@ test('keeps a pending send tracked across Back and reopening the same conversati
       return start.promise;
     }
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -2325,13 +2363,13 @@ test('disposes old workspace sessions before a pending send can start a turn', a
       return { turn: createTurn({ id: 'unexpected', status: 'inProgress' }) };
     }
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -2347,7 +2385,7 @@ test('disposes old workspace sessions before a pending send can start a turn', a
     requestId: 'send-old-workspace',
     text: 'Must not cross workspaces'
   });
-  provider.resetWorkspace();
+  coordinator.resetWorkspace();
   resume.resolve(resumeResponse(createThread()));
   await flushPromises();
 
@@ -2375,22 +2413,22 @@ test('automatically resynchronizes the active conversation after reconnect', asy
       return resumeResponse(createThread({ id: params.threadId }));
     }
   };
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: client,
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
   view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
   await flushPromises();
 
-  provider.setConnectionStatus({ kind: 'error', message: 'Disconnected' });
-  provider.setConnectionStatus({ kind: 'ready' });
+  coordinator.setConnectionStatus({ kind: 'error', message: 'Disconnected' });
+  coordinator.setConnectionStatus({ kind: 'ready' });
   await flushPromises();
   await flushConversationPosts();
 
@@ -2406,7 +2444,7 @@ test('automatically resynchronizes the active conversation after reconnect', asy
 test('reloads the selected thread and drops stale results after another selection or Back', async (t) => {
   setWorkspace();
   const pending: Array<{ threadId: string; read: Deferred<Thread> }> = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => {
       const read = deferred<Thread>();
@@ -2416,7 +2454,7 @@ test('reloads the selected thread and drops stale results after another selectio
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(
+  coordinator.setSnapshot(snapshot(
     displayThread('thread-1', 'Thread 1'),
     displayThread('thread-2', 'Thread 2')
   ));
@@ -2457,7 +2495,7 @@ test('reloads the selected thread and drops stale results after another selectio
 test('waits for the first loaded snapshot before restoring a conversation', async (t) => {
   setWorkspace();
   const reads: string[] = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => {
       reads.push(threadId);
@@ -2485,7 +2523,7 @@ test('waits for the first loaded snapshot before restoring a conversation', asyn
     false
   );
 
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   await flushPromises();
   assert.deepEqual(reads, ['thread-1']);
   assert.equal(
@@ -2499,7 +2537,7 @@ test('waits for the first loaded snapshot before restoring a conversation', asyn
 test('returns stale thread selections to the latest list and reports read failures', async (t) => {
   setWorkspace();
   const logs: string[] = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async () => {
       throw new Error('private failure');
@@ -2507,7 +2545,7 @@ test('returns stale thread selections to the latest list and reports read failur
     logger: { appendLine: (value) => logs.push(value) }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
@@ -2541,7 +2579,7 @@ test('uses an explicit command map and safely restores only known thread state',
     return undefined;
   };
   const reads: string[] = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => {
       reads.push(threadId);
@@ -2555,7 +2593,7 @@ test('uses an explicit command map and safely restores only known thread state',
       executeCommand: (...args: unknown[]) => Promise<unknown>;
     }).executeCommand = originalExecuteCommand as (...args: unknown[]) => Promise<unknown>;
   });
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view, {
     version: 1,
@@ -2600,21 +2638,21 @@ test('uses an explicit command map and safely restores only known thread state',
 test('tracks the conversation context and posts only a correlated prompt focus message', async (t) => {
   setWorkspace();
   const conversationOpen: boolean[] = [];
-  const provider = new ThreadListWebviewProvider({
+  const { provider, coordinator } = createProvider(t, {
     extensionUri: vscode.Uri.file('/extension'),
     conversationClient: fakeConversationClient(async (threadId) => createThread({ id: threadId })),
     onConversationScreenChange: (open) => conversationOpen.push(open),
     logger: { appendLine: () => undefined }
   });
   t.after(() => provider.dispose());
-  provider.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
   const view = new FakeWebviewView();
   resolveProvider(provider, view);
   view.webview.fire({ type: 'threads/ready' });
 
-  assert.equal(provider.focusConversationPrompt(), false);
+  assert.equal(coordinator.focusConversationPrompt(), false);
   view.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
-  assert.equal(provider.focusConversationPrompt(), false);
+  assert.equal(coordinator.focusConversationPrompt(), false);
   await flushPromises();
 
   const loaded = view.webview.postedMessages.find((message) => (
@@ -2622,7 +2660,7 @@ test('tracks the conversation context and posts only a correlated prompt focus m
   )) as { state: { sessionId: string; model: { threadId: string } } } | undefined;
   assert.ok(loaded);
   view.webview.postedMessages.length = 0;
-  assert.equal(provider.focusConversationPrompt(), true);
+  assert.equal(coordinator.focusConversationPrompt(), true);
   assert.deepEqual(view.webview.postedMessages, [{
     type: 'threads/focusConversationPrompt',
     sessionId: loaded.state.sessionId,
@@ -2631,7 +2669,54 @@ test('tracks the conversation context and posts only a correlated prompt focus m
 
   view.webview.fire({ type: 'threads/back' });
   view.webview.postedMessages.length = 0;
-  assert.equal(provider.focusConversationPrompt(), false);
+  assert.equal(coordinator.focusConversationPrompt(), false);
   assert.deepEqual(view.webview.postedMessages, []);
   assert.deepEqual(conversationOpen, [true, false]);
+});
+
+test('recreates the sidebar provider without disposing its shared running session', async (t) => {
+  setWorkspace();
+  let reads = 0;
+  const { provider, coordinator } = createProvider(t, {
+    extensionUri: vscode.Uri.file('/extension'),
+    conversationClient: fakeConversationClient(async () => {
+      reads += 1;
+      return createThread();
+    }),
+    logger: { appendLine: () => undefined }
+  });
+  coordinator.setSnapshot(snapshot(displayThread('thread-1', 'Thread 1')));
+  const first = new FakeWebviewView();
+  resolveProvider(provider, first);
+  first.webview.fire({ type: 'threads/ready' });
+  first.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushPromises();
+  coordinator.handleNotification({
+    method: 'turn/started',
+    params: { threadId: 'thread-1', turn: createTurn({ id: 'live', status: 'inProgress' }) }
+  });
+  provider.dispose();
+  const count = first.webview.postedMessages.length;
+  coordinator.handleNotification({
+    method: 'item/agentMessage/delta',
+    params: { threadId: 'thread-1', turnId: 'live', itemId: 'reply', delta: 'Still running' }
+  });
+  const replacement = new ThreadListWebviewProvider({
+    extensionUri: vscode.Uri.file('/extension'), coordinator,
+    logger: { appendLine: () => undefined }
+  });
+  t.after(() => replacement.dispose());
+  const second = new FakeWebviewView();
+  resolveProvider(replacement, second);
+  second.webview.fire({ type: 'threads/ready' });
+  second.webview.fire({ type: 'threads/open', threadId: 'thread-1' });
+  await flushConversationPosts();
+  assert.equal(reads, 1);
+  assert.equal(first.webview.postedMessages.length, count);
+  const loaded = second.webview.postedMessages.find((message) =>
+    (message as { type?: string }).type === 'threads/conversationLoaded'
+  ) as { state: { execution: { kind: string }; model: unknown } } | undefined;
+  assert.ok(loaded);
+  assert.equal(loaded.state.execution.kind, 'running');
+  assert.match(JSON.stringify(loaded.state.model), /Still running/u);
 });

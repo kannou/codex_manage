@@ -4,7 +4,7 @@ import type { Model } from '../../src/codex/protocol/generated/v2/Model';
 import {
   newConversationPermissions,
   newConversationServiceTier
-} from '../../src/views/threadListWebviewProvider';
+} from '../../src/conversation/conversationCoordinator';
 
 const model: Model = {
   id: 'gpt-default',
