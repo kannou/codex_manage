@@ -166,6 +166,8 @@ export type ThreadsWebviewToHostMessage =
   | { readonly type: 'threads/viewFocus'; readonly focused: boolean }
   | { readonly type: 'threads/new' }
   | { readonly type: 'threads/open'; readonly threadId: string }
+  | { readonly type: 'threads/openEditor'; readonly threadId: string }
+  | { readonly type: 'threads/openSidebar'; readonly sessionId: string; readonly threadId: string }
   | { readonly type: 'threads/back' }
   | { readonly type: 'threads/reload' }
   | { readonly type: 'threads/conversation/usage/read' }
@@ -424,8 +426,12 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
   if (value.type === 'threads/viewFocus') {
     return hasOnlyKeys(value, ['type', 'focused']) && typeof value.focused === 'boolean';
   }
-  if (value.type === 'threads/open') {
-    return isBoundedId(value.threadId);
+  if (value.type === 'threads/open' || value.type === 'threads/openEditor') {
+    return hasOnlyKeys(value, ['type', 'threadId']) && isBoundedId(value.threadId);
+  }
+  if (value.type === 'threads/openSidebar') {
+    return hasOnlyKeys(value, ['type', 'sessionId', 'threadId']) &&
+      isBoundedId(value.sessionId) && isBoundedId(value.threadId);
   }
   if (value.type === 'threads/new') {
     return hasOnlyKeys(value, ['type']);

@@ -162,7 +162,7 @@ button.new-conversation:disabled {
   width: 100%;
   min-width: 0;
   min-height: 46px;
-  padding: 6px 80px 6px 8px;
+  padding: 6px 104px 6px 8px;
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
@@ -174,8 +174,8 @@ button.new-conversation:disabled {
   cursor: pointer;
 }
 
-.thread-card--single-action .thread-open {
-  padding-right: 34px;
+.thread-card--two-actions .thread-open {
+  padding-right: 58px;
 }
 
 .thread-open:focus-visible {

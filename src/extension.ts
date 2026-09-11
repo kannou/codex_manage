@@ -66,11 +66,6 @@ export function activate(context: vscode.ExtensionContext): void {
     return activeClient;
   };
 
-  const readThread = async (threadId: string) => {
-    const client = activeClient ?? replaceClient();
-    return (await client.readThread({ threadId, includeTurns: true })).thread;
-  };
-
   const threadRefreshRunner = createCoalescingTaskRunner(refreshThreads);
   const requestThreadRefresh = (notifyOnError: boolean): Promise<void> =>
     threadRefreshRunner.run(notifyOnError);
@@ -112,6 +107,8 @@ export function activate(context: vscode.ExtensionContext): void {
       await repo.renameThread(threadId, name);
       coordinator.setSnapshot(repo.snapshot());
     },
+    onOpenEditor: (reference) => conversationPanels.openThread(reference),
+    revealSidebar: async () => { await vscode.commands.executeCommand('codexThreadManager.threads.focus'); },
     onConversationScreenChange: (open) => {
       void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, open);
     },
@@ -214,7 +211,7 @@ export function activate(context: vscode.ExtensionContext): void {
   repository.setPinnedThreadIds(pinStore.getPinnedThreadIds());
   const conversationPanels = new ConversationPanelManager({
     extensionUri: context.extensionUri,
-    readThread,
+    coordinator,
     logger: output
   });
 
@@ -256,8 +253,10 @@ export function activate(context: vscode.ExtensionContext): void {
       openThread(threadId, repository, conversationPanels)
     ),
     vscode.commands.registerCommand('codexThreadManager.focusConversationPrompt', async () => {
-      await vscode.commands.executeCommand('codexThreadManager.threads.focus');
-      coordinator.focusConversationPrompt();
+      if (!conversationPanels.focusPrompt()) {
+        await vscode.commands.executeCommand('codexThreadManager.threads.focus');
+        coordinator.focusConversationPrompt();
+      }
     }),
     vscode.commands.registerCommand('codexThreadManager.loadMoreActive', () => loadMoreThreads('active')),
     vscode.commands.registerCommand('codexThreadManager.loadMoreArchive', () => loadMoreThreads('archive')),

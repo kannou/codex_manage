@@ -871,8 +871,10 @@ test('searches and selects correlated file and Skill suggestions without accepti
     requestId: 'file-second',
     suggestionId: secondFileSuggestionId
   });
-  await flushPromises();
-  await flushPromises();
+  await view.webview.waitForMessage((message) =>
+    (message as { type?: unknown }).type === 'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-second'
+  );
   const afterSecondFile = [...view.webview.postedMessages].reverse().find((message) =>
     (message as { type?: unknown; requestId?: unknown }).type ===
       'threads/conversationSuggestionSelection' &&
@@ -950,8 +952,10 @@ test('searches and selects correlated file and Skill suggestions without accepti
     requestId: 'file-duplicate',
     suggestionId: duplicateSuggestionId
   });
-  await flushPromises();
-  await flushPromises();
+  await view.webview.waitForMessage((message) =>
+    (message as { type?: unknown }).type === 'threads/conversationSuggestionSelection' &&
+    (message as { requestId?: unknown }).requestId === 'file-duplicate'
+  );
   assert.equal(view.webview.postedMessages.some((message) =>
     (message as { type?: unknown; requestId?: unknown; outcome?: unknown }).type ===
       'threads/conversationSuggestionSelection' &&

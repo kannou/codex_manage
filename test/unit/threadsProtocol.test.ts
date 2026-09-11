@@ -9,6 +9,17 @@ import {
   restoreThreadsWebviewState
 } from '../../src/webview/threads/protocol';
 
+test('validates editor navigation and requires a correlated sidebar return', () => {
+  assert.equal(isThreadsWebviewMessage({ type: 'threads/openEditor', threadId: 'thread-1' }), true);
+  assert.equal(isThreadsWebviewMessage({ type: 'threads/openEditor', threadId: '' }), false);
+  assert.equal(isThreadsWebviewMessage({ type: 'threads/openEditor', threadId: 't', command: 'arbitrary' }), false);
+  assert.equal(isThreadsWebviewMessage({ type: 'threads/openSidebar', threadId: 't', sessionId: 's' }), true);
+  assert.equal(isThreadsWebviewMessage({ type: 'threads/openSidebar', threadId: 't' }), false);
+  assert.equal(isThreadsWebviewMessage({
+    type: 'threads/openSidebar', threadId: 't', sessionId: 's'.repeat(MAX_CONVERSATION_ID_LENGTH + 1)
+  }), false);
+});
+
 const conversationState = {
   sessionId: 'session-1',
   revision: 1,

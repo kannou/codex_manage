@@ -111,6 +111,14 @@ async function open(coordinator: ConversationCoordinator, presentation = new Pre
   return { presentation, connection, sessionId: presentation.state().sessionId };
 }
 
+async function openEditor(coordinator: ConversationCoordinator) {
+  const presentation = new Presentation();
+  const connection = coordinator.attachPresentation(presentation, 'thread-1', { id: 'thread-1', title: 'Thread 1' });
+  connection.handleMessage({ type: 'threads/ready' });
+  await flush();
+  return { presentation, connection, sessionId: presentation.state().sessionId };
+}
+
 test('keeps a running session and applies notifications with no presentation attached', async (t) => {
   const { coordinator, calls } = setup(t);
   const first = await open(coordinator);
@@ -267,4 +275,195 @@ test('coordinator disposal invalidates bindings and prevents a pending send from
   assert.equal(calls.starts, 0);
   assert.equal(first.presentation.messages.length, count);
   assert.throws(() => coordinator.attachPresentation(new Presentation()), /disposed/u);
+});
+
+test('switches a streaming turn between sidebar and editor without resuming or starting again', async (t) => {
+  const { coordinator, calls } = setup(t);
+  const sidebar = await open(coordinator);
+  sidebar.connection.handleMessage({
+    type: 'threads/conversation/send', sessionId: sidebar.sessionId,
+    threadId: 'thread-1', requestId: 'send', text: 'Start'
+  });
+  await flush();
+  const resumes = calls.resumes;
+  const editor = await openEditor(coordinator);
+  assert.ok(sidebar.presentation.messages.some((message) => message.type === 'threads/showList'));
+  const sidebarCount = sidebar.presentation.messages.length;
+  sidebar.connection.handleMessage({
+    type: 'threads/conversation/stop', sessionId: editor.sessionId,
+    threadId: 'thread-1', requestId: 'stale-stop'
+  });
+  coordinator.handleNotification({
+    method: 'item/agentMessage/delta',
+    params: { threadId: 'thread-1', turnId: 'live', itemId: 'reply', delta: 'Editor stream' }
+  });
+  await flush();
+  assert.equal(calls.interrupts.length, 0);
+  assert.equal(sidebar.presentation.messages.length, sidebarCount);
+  assert.match(JSON.stringify(editor.presentation.state().model), /Editor stream/u);
+  editor.connection.handleMessage({
+    type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1'
+  });
+  await flush();
+  const resumedSidebar = sidebar.presentation.state();
+  assert.equal(resumedSidebar.execution.kind, 'running');
+  assert.match(JSON.stringify(resumedSidebar.model), /Editor stream/u);
+  editor.connection.handleMessage({
+    type: 'threads/conversation/stop', sessionId: resumedSidebar.sessionId,
+    threadId: 'thread-1', requestId: 'stale-editor-stop'
+  });
+  sidebar.connection.handleMessage({
+    type: 'threads/conversation/stop', sessionId: resumedSidebar.sessionId,
+    threadId: 'thread-1', requestId: 'stop'
+  });
+  await flush();
+  assert.deepEqual(calls.interrupts, [{ threadId: 'thread-1', turnId: 'live' }]);
+  assert.equal(calls.starts, 1);
+  assert.equal(calls.reads, 1);
+  assert.equal(calls.resumes, resumes);
+});
+
+test('allows the passive sidebar to reopen a conversation and keeps list updates live', async (t) => {
+  const opened: string[] = [];
+  const { coordinator } = setup(t, { onOpenEditor: (reference) => opened.push(reference.id) });
+  const sidebar = await open(coordinator);
+  const editor = await openEditor(coordinator);
+  const editorCount = editor.presentation.messages.length;
+  coordinator.setConnectionStatus({ kind: 'connecting' });
+  const list = sidebar.presentation.messages.at(-1);
+  assert.equal(list?.type, 'threads/listState');
+  if (list?.type === 'threads/listState') assert.equal(list.status.kind, 'connecting');
+  sidebar.connection.handleMessage({ type: 'threads/openEditor', threadId: 'thread-1' });
+  sidebar.connection.handleMessage({ type: 'threads/openEditor', threadId: 'unknown' });
+  assert.deepEqual(opened, ['thread-1']);
+  sidebar.connection.handleMessage({ type: 'threads/open', threadId: 'thread-1' });
+  await flush();
+  assert.notEqual(sidebar.presentation.state().sessionId, sidebar.sessionId);
+  assert.equal(editor.presentation.messages.length, editorCount);
+  assert.equal(coordinator.focusConversationPrompt(), true);
+});
+
+test('opens an editor without a sidebar and transfers to a lazily resolved sidebar', async (t) => {
+  let resolveReveal!: () => void;
+  const { coordinator, calls } = setup(t, {
+    revealSidebar: () => new Promise<void>((resolve) => { resolveReveal = resolve; })
+  });
+  const editor = await openEditor(coordinator);
+  editor.connection.handleMessage({
+    type: 'threads/conversation/draft/update', sessionId: editor.sessionId,
+    threadId: 'thread-1', text: 'Preserve this draft'
+  });
+  editor.connection.handleMessage({
+    type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1'
+  });
+  const sidebar = await open(coordinator);
+  resolveReveal();
+  await flush();
+  assert.equal(sidebar.presentation.state().draftText, 'Preserve this draft');
+  assert.equal(calls.reads, 1);
+  assert.equal(calls.resumes, 1);
+});
+
+test('resolving a sidebar while an editor is active leaves the editor in control', async (t) => {
+  const { coordinator } = setup(t);
+  const editor = await openEditor(coordinator);
+  const sidebar = new Presentation();
+  const connection = coordinator.attachPresentation(sidebar, 'thread-1');
+  connection.handleMessage({ type: 'threads/ready' });
+  assert.ok(sidebar.messages.some((message) => message.type === 'threads/showList'));
+  assert.ok(sidebar.messages.every((message) => message.type !== 'threads/conversationLoaded'));
+  coordinator.focusConversationPrompt();
+  assert.equal(editor.presentation.messages.at(-1)?.type, 'threads/focusConversationPrompt');
+});
+
+test('a pending send clears only its own draft after moving to the editor', async (t) => {
+  const { coordinator, client, calls } = setup(t);
+  const sidebar = await open(coordinator);
+  let resolveStart!: (value: Awaited<ReturnType<ConversationSessionClient['startTurn']>>) => void;
+  client.startTurn = () => new Promise((resolve) => { resolveStart = resolve; });
+  sidebar.connection.handleMessage({
+    type: 'threads/conversation/send', sessionId: sidebar.sessionId,
+    threadId: 'thread-1', requestId: 'pending', text: 'First message'
+  });
+  await flush();
+  const resumes = calls.resumes;
+  const editor = await openEditor(coordinator);
+  assert.equal(editor.presentation.state().draftText, 'First message');
+  editor.connection.handleMessage({
+    type: 'threads/conversation/draft/update', sessionId: editor.sessionId,
+    threadId: 'thread-1', text: 'Next message'
+  });
+  resolveStart({ turn: createTurn({ id: 'live', status: 'inProgress' }) });
+  await flush();
+  assert.equal(editor.presentation.state().draftText, 'Next message');
+  assert.equal(editor.presentation.state().execution.kind, 'running');
+  assert.equal(calls.resumes, resumes);
+});
+
+test('stops in the editor, returns to the sidebar, and sends again after completion', async (t) => {
+  const { coordinator, calls } = setup(t);
+  const sidebar = await open(coordinator);
+  const editor = await openEditor(coordinator);
+  editor.connection.handleMessage({
+    type: 'threads/conversation/send', sessionId: editor.sessionId,
+    threadId: 'thread-1', requestId: 'send', text: 'First'
+  });
+  await flush();
+  editor.connection.handleMessage({
+    type: 'threads/conversation/stop', sessionId: editor.sessionId,
+    threadId: 'thread-1', requestId: 'stop'
+  });
+  editor.connection.handleMessage({
+    type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1'
+  });
+  await flush();
+  coordinator.handleNotification({
+    method: 'turn/completed', params: { threadId: 'thread-1', turn: createTurn({ id: 'live', status: 'interrupted' }) }
+  });
+  await flush();
+  assert.equal(sidebar.presentation.state().execution.kind, 'idle');
+  sidebar.connection.handleMessage({
+    type: 'threads/conversation/send', sessionId: sidebar.presentation.state().sessionId,
+    threadId: 'thread-1', requestId: 'next', text: 'Next'
+  });
+  await flush();
+  assert.equal(calls.starts, 2);
+  assert.equal(calls.interrupts.length, 1);
+});
+
+test('keeps a pending reload when moving to the editor without issuing a second resume', async (t) => {
+  const { coordinator, client, calls } = setup(t);
+  const sidebar = await open(coordinator);
+  let resolveResume!: (value: ThreadResumeResponse) => void;
+  let resumes = 0;
+  client.resumeThread = () => {
+    resumes += 1;
+    return new Promise((resolve) => { resolveResume = resolve; });
+  };
+  sidebar.connection.handleMessage({ type: 'threads/reload' });
+  const editor = await openEditor(coordinator);
+  resolveResume(resumeResponse());
+  await flush();
+  assert.equal(resumes, 1);
+  assert.equal(calls.reads, 2);
+  assert.equal(editor.presentation.state().execution.kind, 'idle');
+  assert.equal(coordinator.focusConversationPrompt(), true);
+});
+
+test('a late sidebar reveal cannot replace a newer editor selection', async (t) => {
+  let resolveReveal!: () => void;
+  const { coordinator } = setup(t, {
+    revealSidebar: () => new Promise<void>((resolve) => { resolveReveal = resolve; })
+  });
+  await open(coordinator);
+  const first = await openEditor(coordinator);
+  first.connection.handleMessage({
+    type: 'threads/openSidebar', sessionId: first.sessionId, threadId: 'thread-1'
+  });
+  const second = await openEditor(coordinator);
+  resolveReveal();
+  await flush();
+  coordinator.focusConversationPrompt();
+  assert.equal(second.presentation.messages.at(-1)?.type, 'threads/focusConversationPrompt');
+  assert.equal(second.presentation.state().sessionId, second.sessionId);
 });

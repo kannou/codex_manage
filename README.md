@@ -77,8 +77,12 @@ Reload VS Code after installation.
 12. Enter a text message and select **Send**, or press Ctrl+Enter / Cmd+Enter. Enter by itself inserts a new line.
 13. While Codex is responding, select **Stop** to interrupt that turn.
 14. Use the star in a turn header to bookmark it, then select it from the conversation header's **Bookmarks** menu to move back to it.
-15. Use the reload icon to reconnect and re-synchronize the selected conversation, then the back icon to return to the list.
+15. Use **⋯ → Reload** in the conversation header to reconnect and re-synchronize the selected conversation. In the sidebar, use the back icon to return to the list.
 16. Open **View: Toggle Output** and select `Codex Thread Manager` for connection diagnostics.
+
+Use a row's **↗ (Open in editor)** action or **⋯ → Open in editor** in the conversation header to move an existing conversation into an editor tab. The tab uses the same composer, **Send**, **Stop**, and Reload controls. Select **⋯ → Open in sidebar** to close the tab and return to the sidebar.
+
+Only one conversation screen is operable per window. Switching preserves the running turn, draft, and attachments. Closing the tab keeps the turn running and leaves the sidebar on its list; reopen the thread to see its latest state.
 
 Only threads whose `cwd` exactly matches one of the open workspace folder paths are shown. Threads started in a nested subdirectory are not included in this MVP.
 

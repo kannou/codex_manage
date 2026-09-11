@@ -42,19 +42,13 @@ export function createConversationWebviewHtml(
   <title>${escapeHtml(state.title)}</title>
 </head>
 <body
+  data-location="editor"
+  data-reduce-motion="auto"
   data-state-version="${state.version}"
   data-thread-id="${escapeAttribute(state.threadId)}"
   data-thread-title="${escapeAttribute(state.title)}"
 >
-  <header class="page-header">
-    <div class="page-heading">
-      <h1 id="thread-title">${escapeHtml(state.title)}</h1>
-      <p id="thread-meta" class="muted">Loading conversation history…</p>
-    </div>
-    <button id="reload-button" class="secondary-button" type="button">Reload history</button>
-  </header>
-  <div id="notice" class="notice" role="status" aria-live="polite">Loading conversation history…</div>
-  <main id="conversation" aria-live="polite" aria-busy="true"></main>
+  <main id="app" aria-live="polite" aria-busy="true">Loading conversation…</main>
   <script nonce="${nonce}" src="${escapeAttribute(scriptUri.toString())}"></script>
 </body>
 </html>`;

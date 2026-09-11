@@ -1,0 +1,71 @@
+body[data-location='editor'] {
+  padding: 12px 20px 24px;
+  background: var(--vscode-editor-background);
+}
+
+body[data-location='editor'] #app {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+body[data-location='editor'] .conversation-header,
+body[data-location='editor'] .conversation-composer {
+  background: var(--vscode-editor-background);
+}
+
+.conversation-menu {
+  position: relative;
+  flex: 0 0 24px;
+}
+
+.conversation-menu > summary {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.conversation-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-menu > summary:hover,
+.conversation-menu[open] > summary {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.conversation-menu-items {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 4;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--vscode-menu-background, var(--vscode-editor-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+}
+
+.conversation-menu-items > button {
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  color: inherit;
+  background: transparent;
+}
+
+.conversation-menu-items > button:hover {
+  color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+}
+
+@media (max-width: 480px) {
+  body[data-location='editor'] {
+    padding: 8px 10px 20px;
+  }
+}

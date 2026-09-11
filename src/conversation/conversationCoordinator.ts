@@ -93,6 +93,8 @@ export interface ConversationCoordinatorOptions {
   readonly renameConversationThread?: (threadId: string, name: string) => Promise<void>;
   readonly onConversationScreenChange?: (open: boolean) => void;
   readonly onListRefreshRequested?: () => void;
+  readonly onOpenEditor?: (reference: { readonly id: string; readonly title: string }) => void;
+  readonly revealSidebar?: () => Promise<void>;
   readonly respondToServerRequest?: (id: AppServerRequest['id'], result: unknown) => Promise<boolean>;
   readonly pickLocalImages?: () => Promise<readonly PickedLocalImage[]>;
   readonly pickMentionFiles?: () => Promise<readonly PickedMentionFile[]>;
@@ -224,6 +226,14 @@ export interface ConversationPresentation {
   postMessage(message: ThreadsHostToWebviewMessage): void;
   isVisible(): boolean;
   setUnreadCount(count: number): void;
+  deactivate?(): void;
+}
+
+interface PresentationBinding {
+  readonly location: 'sidebar' | 'editor';
+  readonly presentation: ConversationPresentation;
+  readonly reference?: { readonly id: string; readonly title: string };
+  ready: boolean;
 }
 
 export interface ConversationViewConnection {
@@ -234,7 +244,9 @@ export interface ConversationViewConnection {
 
 export class ConversationCoordinator implements vscode.Disposable {
   private presentation: ConversationPresentation | undefined;
-  private presentationBinding: object | undefined;
+  private presentationBinding: PresentationBinding | undefined;
+  private readonly presentations = new Map<'sidebar' | 'editor', PresentationBinding>();
+  private pendingSidebarNavigation: { readonly threadId: string } | undefined;
   private snapshot: ThreadRepositorySnapshot = {
     pinned: { threads: [], nextCursor: null, loaded: true },
     active: { threads: [], nextCursor: null, loaded: false },
@@ -275,19 +287,59 @@ export class ConversationCoordinator implements vscode.Disposable {
 
   public attachPresentation(
     presentation: ConversationPresentation,
-    restoredThreadId?: string
+    restoredThreadId?: string,
+    editorReference?: { readonly id: string; readonly title: string }
   ): ConversationViewConnection {
     if (this.disposed) throw new Error('The conversation coordinator is disposed.');
-    this.detachPresentation();
-    this.presentation = presentation;
-    this.pendingRestoreThreadId = restoredThreadId;
+    const binding: PresentationBinding = {
+      location: editorReference ? 'editor' : 'sidebar', presentation,
+      reference: editorReference, ready: false
+    };
+    this.presentations.set(binding.location, binding);
+    if (binding.location === 'editor' || this.presentationBinding?.location !== 'editor' || this.pendingSidebarNavigation) {
+      const threadId = binding.location === 'sidebar'
+        ? this.pendingSidebarNavigation?.threadId ?? restoredThreadId
+        : restoredThreadId;
+      this.pendingSidebarNavigation = undefined;
+      this.activatePresentation(binding, threadId);
+    }
     this.updateUnreadCompletionPresentation();
-    // A binding identity also rejects messages if the same presentation is reattached.
-    const binding = {};
-    this.presentationBinding = binding;
     return {
       handleMessage: (message) => {
-        if (this.presentationBinding === binding) this.handleMessage(message);
+        if (this.disposed || this.presentations.get(binding.location) !== binding) return;
+        if (message.type === 'threads/ready') {
+          binding.ready = true;
+          if (binding.location === 'editor') {
+            presentation.postMessage({ type: 'threads/reduceMotion', preference: this.reduceMotionPreference() });
+          }
+        }
+        if (binding.location === 'sidebar') {
+          if (message.type === 'threads/open' || message.type === 'threads/new') {
+            this.pendingSidebarNavigation = undefined;
+            this.activatePresentation(binding);
+          } else if (message.type === 'threads/openEditor') {
+            this.openEditor(message.threadId);
+            return;
+          } else if (message.type === 'threads/action') {
+            this.executeAction(message.action, message.threadId);
+            return;
+          }
+        } else if (message.type === 'threads/openSidebar') {
+          if (this.presentationBinding === binding && this.isCurrentSession(message.sessionId, message.threadId)) {
+            void this.openSidebar(message.threadId);
+          }
+          return;
+        } else if (message.type === 'threads/new' || message.type === 'threads/open' ||
+                   message.type === 'threads/openEditor' || message.type === 'threads/action' ||
+                   message.type === 'threads/back') {
+          return;
+        }
+        if (this.presentationBinding === binding) {
+          this.handleMessage(message);
+        } else if (message.type === 'threads/ready') {
+          presentation.postMessage({ type: 'threads/showList' });
+          this.postListState();
+        }
       },
       visibilityChanged: () => {
         if (this.presentationBinding === binding && !presentation.isVisible()) {
@@ -295,9 +347,55 @@ export class ConversationCoordinator implements vscode.Disposable {
         }
       },
       dispose: () => {
+        if (this.presentations.get(binding.location) !== binding) return;
+        this.presentations.delete(binding.location);
         if (this.presentationBinding === binding) this.detachPresentation();
       }
     };
+  }
+
+  private activatePresentation(binding: PresentationBinding, threadId?: string): void {
+    if (this.presentationBinding === binding) return;
+    const previous = this.presentationBinding;
+    this.detachPresentation();
+    this.presentationBinding = binding;
+    this.presentation = binding.presentation;
+    this.viewReady = binding.ready;
+    this.pendingRestoreThreadId = threadId;
+    if (previous?.location === 'sidebar') {
+      previous.presentation.postMessage({ type: 'threads/showList' });
+      this.postListState();
+    } else {
+      if (previous && this.presentations.get(previous.location) === previous) {
+        this.presentations.delete(previous.location);
+      }
+      previous?.presentation.deactivate?.();
+    }
+  }
+
+  private openEditor(threadId: string): void {
+    const reference = this.findConversationReference(threadId);
+    if (!reference) return;
+    this.pendingSidebarNavigation = undefined;
+    this.options.onOpenEditor?.(reference);
+  }
+
+  private async openSidebar(threadId: string): Promise<void> {
+    const navigation = { threadId };
+    this.pendingSidebarNavigation = navigation;
+    try {
+      await this.options.revealSidebar?.();
+      if (this.disposed || this.pendingSidebarNavigation !== navigation) return;
+      const sidebar = this.presentations.get('sidebar');
+      if (!sidebar) return;
+      this.pendingSidebarNavigation = undefined;
+      this.activatePresentation(sidebar, threadId);
+      if (sidebar.ready) this.resolvePendingRestore();
+    } catch (error) {
+      if (this.pendingSidebarNavigation !== navigation) return;
+      this.pendingSidebarNavigation = undefined;
+      this.options.logger.appendLine(`[conversation] Could not reveal sidebar: ${asError(error).message}`);
+    }
   }
 
   private detachPresentation(): void {
@@ -466,16 +564,15 @@ export class ConversationCoordinator implements vscode.Disposable {
         session.updateTitle(reference.title);
       }
     }
-    if (!this.resolvePendingRestore() && !this.activeThread && !this.newConversationDraft) {
+    if (!this.resolvePendingRestore() && ((!this.activeThread && !this.newConversationDraft) || this.presentationBinding?.location === 'editor')) {
       this.postListState();
     }
   }
 
   public refreshReduceMotion(): void {
-    this.post({
-      type: 'threads/reduceMotion',
-      preference: this.reduceMotionPreference()
-    });
+    for (const { presentation } of this.presentations.values()) {
+      presentation.postMessage({ type: 'threads/reduceMotion', preference: this.reduceMotionPreference() });
+    }
   }
 
   private async copyConversationContent(
@@ -586,7 +683,7 @@ export class ConversationCoordinator implements vscode.Disposable {
     ) {
       this.loadNewConversationRuntime(this.newConversationDraft);
     }
-    if (!this.resolvePendingRestore() && !this.activeThread && !this.newConversationDraft) {
+    if (!this.resolvePendingRestore() && ((!this.activeThread && !this.newConversationDraft) || this.presentationBinding?.location === 'editor')) {
       this.postListState();
     }
   }
@@ -832,6 +929,8 @@ export class ConversationCoordinator implements vscode.Disposable {
   }
 
   public resetWorkspace(): void {
+    this.pendingSidebarNavigation = undefined;
+    this.presentations.get('editor')?.presentation.deactivate?.();
     this.generation += 1;
     this.clearConversationSession();
     this.disposeConversationSessions();
@@ -869,6 +968,8 @@ export class ConversationCoordinator implements vscode.Disposable {
     this.viewReady = false;
     this.presentation = undefined;
     this.presentationBinding = undefined;
+    this.presentations.clear();
+    this.pendingSidebarNavigation = undefined;
   }
 
   private showList(): void {
@@ -882,7 +983,7 @@ export class ConversationCoordinator implements vscode.Disposable {
   }
 
   private openConversation(threadId: string): void {
-    const reference = this.findThread(threadId);
+    const reference = this.findConversationReference(threadId);
     if (this.disposed || !this.presentation) {
       this.options.logger.appendLine(`[threads] Ignored conversation request for unknown thread ${threadId}.`);
       return;
@@ -1231,12 +1332,15 @@ export class ConversationCoordinator implements vscode.Disposable {
     }
 
     const generation = this.generation;
+    const sentAttachments = new Set(conversationDraft.attachments.map((attachment) => attachment.id));
     const result = operation === 'send'
       ? session.send(text ?? '', conversationDraft.attachments.map(toAdditionalInput))
       : session.stop();
     void result.then((accepted) => {
       if (operation === 'send' && accepted) {
-        this.conversationDrafts.delete(threadId);
+        if (conversationDraft.text === text) conversationDraft.text = '';
+        conversationDraft.attachments = conversationDraft.attachments.filter((attachment) => !sentAttachments.has(attachment.id));
+        if (this.activeThread?.id === threadId) this.postCurrentConversationState();
       }
       if (!this.isCurrentConversation(generation, threadId, sessionId)) {
         return;
@@ -2118,7 +2222,7 @@ export class ConversationCoordinator implements vscode.Disposable {
     if (!threadId || !this.viewReady || !this.presentation) {
       return false;
     }
-    if (this.findThread(threadId)) {
+    if (this.findConversationReference(threadId)) {
       this.pendingRestoreThreadId = undefined;
       this.openConversation(threadId);
       return true;
@@ -2395,6 +2499,16 @@ export class ConversationCoordinator implements vscode.Disposable {
     return undefined;
   }
 
+  private findConversationReference(threadId: string): { readonly id: string; readonly title: string } | undefined {
+    const listed = this.findThread(threadId);
+    if (listed) return listed;
+    const reference = this.presentationBinding?.reference;
+    if (reference?.id === threadId) return reference;
+    const session = this.conversationSessions.get(threadId);
+    if (session) return { id: threadId, title: session.snapshot().model.title };
+    return undefined;
+  }
+
   private recordCompletedTurn(threadId: string, turnId: string): void {
     if (!this.isTrackedCompletionThread(threadId)) {
       return;
@@ -2450,14 +2564,14 @@ export class ConversationCoordinator implements vscode.Disposable {
 
   private updateUnreadCompletionPresentation(updateList = true): void {
     const count = this.unreadCompletedTurnByThread.size;
-    this.presentation?.setUnreadCount(count);
-    if (updateList && this.viewReady && !this.activeThread && !this.newConversationDraft) {
+    this.presentations.get('sidebar')?.presentation.setUnreadCount(count);
+    if (updateList && ((!this.activeThread && !this.newConversationDraft) || this.presentationBinding?.location === 'editor')) {
       this.postListState();
     }
   }
 
   private postListState(): void {
-    this.post({
+    this.presentations.get('sidebar')?.presentation.postMessage({
       type: 'threads/listState',
       snapshot: toListSnapshot(this.snapshot, this.unreadCompletedTurnByThread),
       status: this.status,

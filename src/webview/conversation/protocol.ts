@@ -28,9 +28,8 @@ export function isConversationWebviewState(value: unknown): value is Conversatio
   return (
     isObject(value) &&
     value.version === 1 &&
-    typeof value.threadId === 'string' &&
-    Boolean(value.threadId) &&
-    typeof value.title === 'string'
+    isBoundedId(value.threadId) &&
+    typeof value.title === 'string' && value.title.length <= 512
   );
 }
 
