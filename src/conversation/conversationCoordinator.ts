@@ -283,6 +283,8 @@ export class ConversationCoordinator implements vscode.Disposable {
   private conversationScreenOpen = false;
   private webviewFocused = false;
   private accountRateLimits: GetAccountRateLimitsResponse['rateLimits'] | undefined;
+  private rateLimitResetCreditsAvailable: string | null = null;
+  private resetTicketDetails: { title: string | null; expiresAt: number | null }[] | null = null;
   private disposed = false;
 
   public constructor(private readonly options: ConversationCoordinatorOptions) {}
@@ -862,7 +864,20 @@ export class ConversationCoordinator implements vscode.Disposable {
     this.post({ type: 'threads/conversationUsage', status: 'loading' });
     try {
       if (!this.options.readAccountRateLimits) throw new Error('Rate limits are unsupported.');
-      this.accountRateLimits = (await this.options.readAccountRateLimits()).rateLimits;
+      const response = await this.options.readAccountRateLimits();
+      this.accountRateLimits = response.rateLimits;
+      // JSON transports return numbers even though the generated u64 type is bigint.
+      const count: unknown = response.rateLimitResetCredits?.availableCount;
+      this.rateLimitResetCreditsAvailable =
+        (typeof count === 'bigint' && count >= 0n) ||
+        (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)
+          ? String(count) : null;
+      const details = response.rateLimitResetCredits?.credits;
+      this.resetTicketDetails = Array.isArray(details) && details.every((credit) =>
+        credit && (credit.title === null || typeof credit.title === 'string') &&
+        (credit.expiresAt === null || (typeof credit.expiresAt === 'number' &&
+          Number.isFinite(credit.expiresAt) && Math.abs(credit.expiresAt) <= 8.64e12)))
+        ? details.map(({ title, expiresAt }) => ({ title, expiresAt })) : null;
       this.postUsage(this.accountRateLimits);
     } catch (error) {
       this.options.logger.appendLine(`[threads] Could not read account rate limits: ${asError(error).message}`);
@@ -878,7 +893,9 @@ export class ConversationCoordinator implements vscode.Disposable {
     this.post({ type: 'threads/conversationUsage', status: 'ready', usage: {
       primary: window(snapshot.primary), secondary: window(snapshot.secondary),
       credits: snapshot.credits && { unlimited: snapshot.credits.unlimited, balance: snapshot.credits.balance },
-      individualLimit: snapshot.individualLimit
+      individualLimit: snapshot.individualLimit,
+      resetTicketsAvailable: this.rateLimitResetCreditsAvailable,
+      resetTicketDetails: this.resetTicketDetails
     }});
   }
 

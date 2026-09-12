@@ -101,6 +101,8 @@ export interface ConversationMessageBookmark {
 }
 
 export interface UsageSnapshot {
+  readonly resetTicketsAvailable?: string | null;
+  readonly resetTicketDetails?: readonly { readonly title: string | null; readonly expiresAt: number | null }[] | null;
   readonly primary: UsageWindow | null;
   readonly secondary: UsageWindow | null;
   readonly credits: { readonly unlimited: boolean; readonly balance: string | null } | null;
@@ -730,6 +732,13 @@ function isConversationSuggestion(
 
 function isUsageSnapshot(value: unknown): boolean {
   return isObject(value) && isUsageWindow(value.primary) && isUsageWindow(value.secondary) &&
+    (value.resetTicketsAvailable === undefined || value.resetTicketsAvailable === null ||
+      (typeof value.resetTicketsAvailable === 'string' && /^(0|[1-9]\d*)$/.test(value.resetTicketsAvailable))) &&
+    (value.resetTicketDetails === undefined || value.resetTicketDetails === null ||
+      (Array.isArray(value.resetTicketDetails) && value.resetTicketDetails.every((ticket) =>
+        isObject(ticket) && (ticket.title === null || typeof ticket.title === 'string') &&
+        (ticket.expiresAt === null || (typeof ticket.expiresAt === 'number' &&
+          Number.isFinite(ticket.expiresAt) && Math.abs(ticket.expiresAt) <= 8.64e12))))) &&
     (value.credits === null || (isObject(value.credits) && typeof value.credits.unlimited === 'boolean' &&
       (value.credits.balance === null || typeof value.credits.balance === 'string'))) &&
     (value.individualLimit === null || (isObject(value.individualLimit) && typeof value.individualLimit.limit === 'string' &&
