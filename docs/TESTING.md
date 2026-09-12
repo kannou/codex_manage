@@ -131,6 +131,22 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Install the generated VSIX into a clean VS Code profile and repeat the basic list/pin/rename/archive flow.
 - Confirm the installed VSIX can load both the thread list and sidebar conversation styles/scripts.
 
+## Phase 3 presentation parity
+
+Run these checks in both the sidebar and the editor, including a round trip while the operation is pending. Automated coordinator tests cover routing and state retention; they do not validate Webview rendering or keyboard behavior.
+
+| Area | Manual check |
+| --- | --- |
+| Runtime and attachments | Change model, reasoning, speed, and permissions; add images, file mentions, and Skills. Switch presentation, remove an attachment, and send. Confirm the intended settings and inputs reach the turn. If a picker remains open during a switch, confirm its result appears in the destination. |
+| Suggestions | Search with `@` and `$`, switch while a search is pending, then search again. Old candidates must not appear. Check selection with mouse, keyboard, and Japanese IME. |
+| Requests | Switch while an approval, question, or MCP form is pending. Complete it in the destination and confirm exactly one response is sent. |
+| Navigation and output | Exercise Latest, bookmark toggles and navigation, message/code copying, file links, and changed-file links in both presentations. Switch during bookmark saving and confirm the destination shows the saved state. |
+| Usage | Check account usage and context remaining in both presentations, including updates while a turn is running. |
+| Header and focus | Use **⋯ → Reload**, switch presentation, and focus the prompt using the existing shortcut. Check menu dismissal and focus restoration. |
+| Layout | Repeat in narrow editor groups and light, dark, and high-contrast themes on Windows, WSL, and macOS. Inspect long messages, code blocks, forms, and popups for clipping and visible keyboard focus. |
+
+Record the platform, theme, tested areas, and failures in `EDITOR_TAB_CONVERSATION_PLAN.md`. These visual checks remain pending until performed in a running VS Code instance.
+
 ## Real CLI smoke test
 
 The opt-in smoke test remains read-only even though the extension can send messages. It calls `initialize`, `thread/list`, and, when a matching thread exists, `thread/read(includeTurns: true)`. It asserts only the thread ID and turn-array shape and does not print conversation content:

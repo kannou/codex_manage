@@ -1461,8 +1461,10 @@ export class ConversationCoordinator implements vscode.Disposable {
     const picker = this.options.pickLocalImages ?? pickLocalImages;
     void picker().then((picked) => {
       if (
-        generation !== this.generation ||
-        !this.isCurrentSession(sessionId, threadId) ||
+        this.disposed ||
+        (isDraft
+          ? generation !== this.generation || !this.isCurrentSession(sessionId, threadId)
+          : this.conversationSession !== session) ||
         (isDraft
           ? !draft || draft.createPending || !draftSupportsImageInput(draft)
           : !session || session.snapshot().operation !== 'idle' || !session.supportsImageInput())
@@ -1518,8 +1520,10 @@ export class ConversationCoordinator implements vscode.Disposable {
     const picker = this.options.pickMentionFiles ?? pickMentionFiles;
     void picker().then((picked) => {
       if (
-        generation !== this.generation ||
-        !this.isCurrentSession(sessionId, threadId) ||
+        this.disposed ||
+        (isDraft
+          ? generation !== this.generation || !this.isCurrentSession(sessionId, threadId)
+          : this.conversationSession !== session) ||
         (isDraft ? !draft || draft.createPending : !session || session.snapshot().operation !== 'idle')
       ) return;
       const attachments = isDraft ? draft?.attachments : this.restoreConversationDraft(threadId).attachments;
@@ -1578,8 +1582,10 @@ export class ConversationCoordinator implements vscode.Disposable {
     const picker = this.options.pickSkills ?? ((selectedCwd: string) => this.pickAvailableSkills(selectedCwd));
     void picker(cwd).then((picked) => {
       if (
-        generation !== this.generation ||
-        !this.isCurrentSession(sessionId, threadId) ||
+        this.disposed ||
+        (isDraft
+          ? generation !== this.generation || !this.isCurrentSession(sessionId, threadId)
+          : this.conversationSession !== session) ||
         (isDraft ? !draft || draft.createPending : !session || session.snapshot().operation !== 'idle')
       ) return;
       const attachments = isDraft ? draft?.attachments : this.restoreConversationDraft(threadId).attachments;
@@ -2384,7 +2390,7 @@ export class ConversationCoordinator implements vscode.Disposable {
     this.pendingBookmarkUpdates.add(key);
     void store.setBookmarked(threadId, turnId, itemId, !bookmarked, legacyFallback).then(
       () => {
-        if (this.conversationSession === session && this.isCurrentSession(sessionId, threadId)) {
+        if (!this.disposed && this.conversationSession === session) {
           this.postCurrentConversationState();
         }
       },

@@ -467,3 +467,277 @@ test('a late sidebar reveal cannot replace a newer editor selection', async (t) 
   assert.equal(second.presentation.messages.at(-1)?.type, 'threads/focusConversationPrompt');
   assert.equal(second.presentation.state().sessionId, second.sessionId);
 });
+
+function imageModel() {
+  return {
+    id: 'gpt-fixture', model: 'gpt-fixture', upgrade: null, upgradeInfo: null,
+    availabilityNux: null, displayName: 'Fixture', description: '', hidden: false,
+    supportedReasoningEfforts: [{ reasoningEffort: 'medium' as const, description: '' }],
+    defaultReasoningEffort: 'medium' as const, inputModalities: ['text', 'image'] as ('text' | 'image')[],
+    supportsPersonality: false, additionalSpeedTiers: ['fast'],
+    serviceTiers: [{ id: 'priority', name: 'Fast', description: '' }],
+    defaultServiceTier: null, isDefault: true
+  };
+}
+
+for (const kind of ['Image', 'Mention', 'Skill'] as const) {
+  test(`keeps a pending ${kind} selection across presentation changes`, async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'codex-phase3-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const path = join(directory, kind === 'Image' ? 'image.png' : kind === 'Skill' ? 'SKILL.md' : 'context.txt');
+    writeFileSync(path, 'fixture');
+    const picked = { path, sizeBytes: 7, name: 'fixture', description: 'Fixture skill' };
+    let finish!: (value: (typeof picked)[]) => void;
+    const picker = () => new Promise<(typeof picked)[]>((resolve) => { finish = resolve; });
+    const { coordinator, client, calls } = setup(t, {
+      pickLocalImages: picker, pickMentionFiles: picker, pickSkills: picker
+    });
+    client.listModels = async () => ({ data: [imageModel()], nextCursor: null });
+    const sidebar = await open(coordinator);
+    sidebar.connection.handleMessage({
+      type: `threads/conversation/attachment/add${kind}`,
+      sessionId: sidebar.sessionId, threadId: 'thread-1'
+    });
+    const editor = await openEditor(coordinator);
+    finish([picked]);
+    await flush();
+    assert.equal(editor.presentation.state().attachments.length, 1);
+    const attachments = editor.presentation.state().attachments;
+    assert.equal(JSON.stringify(attachments).includes(directory), false);
+    editor.connection.handleMessage({
+      type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1'
+    });
+    await flush();
+    assert.deepEqual(sidebar.presentation.state().attachments, attachments);
+    assert.equal(calls.resumes, 1);
+    assert.equal(calls.starts, 0);
+  });
+}
+
+test('ignores a pending picker after leaving the conversation or disposing the coordinator', async (t) => {
+  for (const dispose of [false, true]) {
+    let finish!: (value: { path: string; sizeBytes: number }[]) => void;
+    const { coordinator } = setup(t, {
+      pickMentionFiles: () => new Promise((resolve) => { finish = resolve; })
+    });
+    const sidebar = await open(coordinator);
+    sidebar.connection.handleMessage({
+      type: 'threads/conversation/attachment/addMention', sessionId: sidebar.sessionId, threadId: 'thread-1'
+    });
+    if (dispose) coordinator.dispose();
+    else sidebar.connection.handleMessage({ type: 'threads/back' });
+    const count = sidebar.presentation.messages.length;
+    finish([{ path: '/workspace/late.txt', sizeBytes: 7 }]);
+    await flush();
+    assert.equal(sidebar.presentation.messages.length, count);
+    if (!dispose) {
+      const reopened = await open(coordinator);
+      assert.deepEqual(reopened.presentation.state().attachments, []);
+    }
+  }
+});
+
+test('publishes a bookmark saved after moving to the editor and prevents duplicate writes', async (t) => {
+  let finish!: () => void;
+  let saved = false;
+  let writes = 0;
+  const { coordinator, client } = setup(t, {
+    turnBookmarkStore: {
+      getBookmarks: () => saved ? [{ turnId: 'turn-1', itemId: 'reply' }] : [],
+      setBookmarked: async () => {
+        writes += 1;
+        await new Promise<void>((resolve) => { finish = resolve; });
+        saved = true;
+      }
+    }
+  });
+  client.readThread = async () => ({ thread: createThread({ turns: [createTurn({ items: [{
+    type: 'agentMessage', id: 'reply', text: 'Bookmark me', phase: 'final_answer', memoryCitation: null
+  }] })] }) });
+  const sidebar = await open(coordinator);
+  const toggle = {
+    type: 'threads/conversation/bookmark/toggle' as const, threadId: 'thread-1',
+    turnId: 'turn-1', itemId: 'reply'
+  };
+  sidebar.connection.handleMessage({ ...toggle, sessionId: sidebar.sessionId });
+  const editor = await openEditor(coordinator);
+  editor.connection.handleMessage({ ...toggle, sessionId: editor.sessionId });
+  assert.equal(writes, 1);
+  finish();
+  await flush();
+  assert.equal(editor.presentation.state().bookmarkedMessages.length, 1);
+});
+
+test('preserves runtime choices on a round trip and uses them for the next editor turn', async (t) => {
+  const { coordinator, client } = setup(t);
+  client.listModels = async () => ({ data: [imageModel()], nextCursor: null });
+  const sidebar = await open(coordinator);
+  const settings = {
+    model: 'gpt-fixture', effort: 'medium' as const, serviceTier: 'priority',
+    sandbox: 'workspace-write' as const, approvalPolicy: 'on-request' as const, approvalsReviewer: 'user' as const
+  };
+  sidebar.connection.handleMessage({
+    type: 'threads/conversation/settings', sessionId: sidebar.sessionId, threadId: 'thread-1', settings
+  });
+  await flush();
+  const before = sidebar.presentation.state().runtime;
+  assert.equal(before.serviceTier, 'priority');
+  const editor = await openEditor(coordinator);
+  assert.deepEqual(editor.presentation.state().runtime, before);
+  editor.connection.handleMessage({ type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1' });
+  await flush();
+  assert.deepEqual(sidebar.presentation.state().runtime, before);
+  const again = await openEditor(coordinator);
+  let resumed: Parameters<ConversationSessionClient['resumeThread']>[0] | undefined;
+  client.resumeThread = async (params) => {
+    resumed = params;
+    return resumeResponse();
+  };
+  let sent: Parameters<ConversationSessionClient['startTurn']>[0] | undefined;
+  client.startTurn = async (params) => {
+    sent = params;
+    return { turn: createTurn({ id: 'live', status: 'inProgress' }) };
+  };
+  again.connection.handleMessage({
+    type: 'threads/conversation/send', sessionId: again.sessionId, threadId: 'thread-1', requestId: 'send', text: 'Configured'
+  });
+  await flush();
+  assert.equal(sent?.serviceTier, 'priority');
+  assert.equal(sent?.model, settings.model);
+  assert.equal(sent?.effort, settings.effort);
+  assert.equal(sent?.approvalPolicy, settings.approvalPolicy);
+  assert.equal(resumed?.sandbox, settings.sandbox);
+  assert.equal(resumed?.approvalsReviewer, settings.approvalsReviewer);
+});
+
+for (const kind of ['approval', 'userInput', 'mcp'] as const) {
+  test(`answers ${kind} only once in the current presentation after a round trip`, async (t) => {
+    const responses: unknown[] = [];
+    const { coordinator } = setup(t, {
+      respondToServerRequest: async (id, result) => { responses.push({ id, result }); return true; }
+    });
+    const sidebar = await open(coordinator);
+    const common = { threadId: 'thread-1', turnId: 'turn-1', itemId: 'item-1' };
+    if (kind === 'approval') {
+      coordinator.handleServerRequest({ id: kind, method: 'item/commandExecution/requestApproval', params: {
+        ...common, startedAtMs: 1, command: 'npm test', cwd: 'D:\\workspace'
+      } });
+    } else if (kind === 'userInput') {
+      coordinator.handleServerRequest({ id: kind, method: 'item/tool/requestUserInput', params: {
+        ...common, autoResolutionMs: null, questions: [{
+          id: 'color', header: 'Color', question: 'Choose', isOther: true, isSecret: false,
+          options: [{ label: 'Blue', description: 'Use blue' }]
+        }]
+      } });
+    } else {
+      coordinator.handleServerRequest({ id: kind, method: 'mcpServer/elicitation/request', params: {
+        threadId: 'thread-1', turnId: 'turn-1', serverName: 'fixture', mode: 'form', _meta: null,
+        message: 'Configure', requestedSchema: {
+          type: 'object', properties: { name: { type: 'string' } }, required: ['name']
+        }
+      } });
+    }
+    const editor = await openEditor(coordinator);
+    const interaction = editor.presentation.state().interactions[0];
+    assert.ok(interaction);
+    const reply = kind === 'approval'
+      ? { kind, decision: 'decline' as const }
+      : kind === 'userInput'
+        ? { kind, answers: { color: ['Blue'] } }
+        : { kind, action: 'accept' as const, values: { name: 'demo' } };
+    const message = {
+      type: 'threads/conversation/interaction' as const, threadId: 'thread-1',
+      interactionId: interaction.id, reply
+    };
+    sidebar.connection.handleMessage({ ...message, sessionId: editor.sessionId });
+    assert.equal(responses.length, 0);
+    editor.connection.handleMessage({ type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1' });
+    await flush();
+    const state = sidebar.presentation.state();
+    assert.deepEqual(state.interactions, editor.presentation.state().interactions);
+    editor.connection.handleMessage({ ...message, sessionId: state.sessionId });
+    assert.equal(responses.length, 0);
+    sidebar.connection.handleMessage({ ...message, sessionId: state.sessionId });
+    sidebar.connection.handleMessage({ ...message, sessionId: state.sessionId });
+    await flush();
+    assert.deepEqual(responses, [{ id: kind, result: kind === 'approval'
+      ? { decision: 'decline' }
+      : kind === 'userInput'
+        ? { answers: { color: { answers: ['Blue'] } } }
+        : { action: 'accept', content: { name: 'demo' }, _meta: null }
+    }]);
+    assert.deepEqual(sidebar.presentation.state().interactions, []);
+  });
+}
+
+test('discards a Skill search from the old screen and allows a fresh editor selection', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'codex-phase3-skill-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, 'SKILL.md');
+  writeFileSync(path, 'fixture');
+  const { coordinator, client } = setup(t);
+  const result = { data: [{ cwd: 'D:\\workspace', errors: [], skills: [{
+    name: 'fixture', description: 'Fixture', path, scope: 'user' as const,
+    enabled: true
+  }] }] };
+  let finish!: (value: typeof result) => void;
+  client.listSkills = () => new Promise((resolve) => { finish = resolve; });
+  const sidebar = await open(coordinator);
+  sidebar.connection.handleMessage({
+    type: 'threads/conversation/suggestion/search', sessionId: sidebar.sessionId,
+    threadId: 'thread-1', requestId: 'old', kind: 'skill', query: 'fixture'
+  });
+  const editor = await openEditor(coordinator);
+  finish(result);
+  await flush();
+  assert.equal(editor.presentation.messages.some((message) => message.type === 'threads/conversationSuggestions'), false);
+  client.listSkills = async () => result;
+  editor.connection.handleMessage({
+    type: 'threads/conversation/suggestion/search', sessionId: editor.sessionId,
+    threadId: 'thread-1', requestId: 'new', kind: 'skill', query: 'fixture'
+  });
+  await flush();
+  const suggestions = editor.presentation.messages.find((message) => message.type === 'threads/conversationSuggestions');
+  assert.ok(suggestions && suggestions.type === 'threads/conversationSuggestions');
+  const candidate = suggestions.suggestions[0];
+  assert.ok(candidate);
+  editor.connection.handleMessage({
+    type: 'threads/conversation/suggestion/select', sessionId: editor.sessionId,
+    threadId: 'thread-1', requestId: 'new', suggestionId: candidate.id
+  });
+  await flush();
+  editor.connection.handleMessage({ type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1' });
+  await flush();
+  assert.equal(sidebar.presentation.state().attachments[0]?.kind, 'skill');
+});
+
+test('keeps context usage across presentation changes and routes account usage to the active screen', async (t) => {
+  const { coordinator, client } = setup(t);
+  client.readThread = async () => ({ thread: createThread({ turns: [createTurn()] }) });
+  const sidebar = await open(coordinator);
+  const breakdown = {
+    totalTokens: 25000, inputTokens: 20000, cachedInputTokens: 5000,
+    outputTokens: 5000, reasoningOutputTokens: 2000
+  };
+  coordinator.handleNotification({ method: 'thread/tokenUsage/updated', params: {
+    threadId: 'thread-1', turnId: 'turn-1',
+    tokenUsage: { total: breakdown, last: breakdown, modelContextWindow: 100000 }
+  } });
+  const expected = sidebar.presentation.state().contextWindow;
+  assert.ok(expected);
+  const editor = await openEditor(coordinator);
+  assert.deepEqual(editor.presentation.state().contextWindow, expected);
+  const sidebarCount = sidebar.presentation.messages.length;
+  coordinator.handleNotification({ method: 'account/rateLimits/updated', params: { rateLimits: {
+    limitId: 'codex', limitName: null,
+    primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1750000000 },
+    secondary: null, credits: null, individualLimit: null, planType: null, rateLimitReachedType: null
+  } } });
+  const usage = editor.presentation.messages.at(-1);
+  assert.ok(usage?.type === 'threads/conversationUsage');
+  assert.equal(usage.usage?.primary?.remainingPercent, 75);
+  assert.equal(sidebar.presentation.messages.length, sidebarCount);
+  editor.connection.handleMessage({ type: 'threads/openSidebar', sessionId: editor.sessionId, threadId: 'thread-1' });
+  await flush();
+  assert.deepEqual(sidebar.presentation.state().contextWindow, expected);
+});
