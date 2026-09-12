@@ -742,6 +742,46 @@ test('keeps context usage across presentation changes and routes account usage t
   assert.deepEqual(sidebar.presentation.state().contextWindow, expected);
 });
 
+test('reads reset ticket counts without losing them on sparse usage updates', async (t) => {
+  const rateLimits = {
+    limitId: 'codex', limitName: null, primary: null, secondary: null,
+    credits: null, individualLimit: null, planType: null, rateLimitReachedType: null
+  };
+  let count: unknown = 3;
+  const credits = [
+    { id: 'expiring', resetType: 'codexRateLimits' as const, status: 'available' as const,
+      grantedAt: 1750000000, expiresAt: 1790000000, title: '期間限定', description: null },
+    { id: 'permanent', resetType: 'codexRateLimits' as const, status: 'available' as const,
+      grantedAt: 1750000000, expiresAt: null, title: null, description: null }
+  ];
+  const { coordinator } = setup(t, {
+    readAccountRateLimits: async () => ({
+      rateLimits, rateLimitsByLimitId: null,
+      rateLimitResetCredits: count === null ? null : { availableCount: count as bigint, credits }
+    })
+  });
+  const { connection, presentation } = await open(coordinator);
+  for (const [input, expected] of [[3, '3'], [0, '0'], [2n, '2'], [null, null], [-1, null], [undefined, null]] as const) {
+    count = input;
+    connection.handleMessage({ type: 'threads/conversation/usage/read' });
+    await flush();
+    const message = presentation.messages.at(-1);
+    assert.ok(message?.type === 'threads/conversationUsage');
+    assert.equal(message.status, 'ready');
+    assert.equal(message.usage?.resetTicketsAvailable, expected);
+    const expectedDetails = input === null ? null : [
+      { title: '期間限定', expiresAt: 1790000000 }, { title: null, expiresAt: null }
+    ];
+    assert.deepEqual(message.usage?.resetTicketDetails, expectedDetails);
+    assert.doesNotThrow(() => JSON.stringify(message));
+    coordinator.handleNotification({ method: 'account/rateLimits/updated', params: { rateLimits } });
+    const update = presentation.messages.at(-1);
+    assert.ok(update?.type === 'threads/conversationUsage');
+    assert.equal(update.usage?.resetTicketsAvailable, expected);
+    assert.deepEqual(update.usage?.resetTicketDetails, expectedDetails);
+  }
+});
+
 test('reload shortcut requires focus on the visible conversation and coalesces repeated reloads', async (t) => {
   const focus: boolean[] = [];
   const { coordinator, client, calls } = setup(t, { onConversationFocusChange: (value) => focus.push(value) });

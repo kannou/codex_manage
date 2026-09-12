@@ -2427,7 +2427,44 @@ function renderUsage(message: Extract<ThreadsHostToWebviewMessage, { type: 'thre
     row.textContent = `Personal limit: ${formatPercent(limit.remainingPercent)} remaining (${limit.used} of ${limit.limit}) · resets ${new Date(limit.resetsAt * 1000).toLocaleString()}`;
     rows.push(row);
   }
-  if (!rows.length) { panel.textContent = 'Usage unavailable'; return; }
+  const tickets = document.createElement('p');
+  tickets.textContent = message.usage.resetTicketsAvailable == null
+    ? 'リセットチケット: 情報を取得できません'
+    : `リセットチケット: 残り ${message.usage.resetTicketsAvailable} 枚`;
+  rows.push(tickets);
+  const details = document.createElement('details');
+  details.className = 'conversation-ticket-details';
+  details.open = panel.querySelector<HTMLDetailsElement>('.conversation-ticket-details')?.open ?? false;
+  const summary = document.createElement('summary');
+  summary.textContent = 'チケットの詳細';
+  const list = document.createElement('div');
+  list.className = 'conversation-ticket-list';
+  const ticketDetails = message.usage.resetTicketDetails;
+  if (!ticketDetails?.length) {
+    const empty = document.createElement('p');
+    empty.textContent = message.usage.resetTicketsAvailable === '0'
+      ? '利用可能なチケットはありません。' : 'チケットの詳細情報を取得できません。';
+    list.append(empty);
+  } else {
+    for (const [index, ticket] of ticketDetails.entries()) {
+      const row = document.createElement('p');
+      const title = document.createElement('span');
+      title.textContent = ticket.title || `チケット ${index + 1}`;
+      const expiry = document.createElement('span');
+      expiry.textContent = ticket.expiresAt === null ? '有効期限: 無期限'
+        : `有効期限: ${new Date(ticket.expiresAt * 1000).toLocaleString()}`;
+      row.append(title, document.createElement('br'), expiry);
+      list.append(row);
+    }
+    if (message.usage.resetTicketsAvailable != null &&
+        BigInt(message.usage.resetTicketsAvailable) > BigInt(ticketDetails.length)) {
+      const note = document.createElement('p');
+      note.textContent = `詳細を取得できた ${ticketDetails.length} 枚を表示しています。`;
+      list.append(note);
+    }
+  }
+  details.append(summary, list);
+  rows.push(details);
   panel.replaceChildren(...rows);
 }
 
