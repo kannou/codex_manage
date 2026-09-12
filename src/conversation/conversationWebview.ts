@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import type { ConversationWebviewState } from '../webview/conversation/protocol';
+import type { ConversationWebviewState } from '../webview/conversation/state';
 
 export function conversationWebviewRoot(extensionUri: vscode.Uri): vscode.Uri {
   return vscode.Uri.joinPath(extensionUri, 'dist', 'webview');

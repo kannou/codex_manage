@@ -1,5 +1,5 @@
 import './styles.css';
-import '../threads/styles.css';
+import '../application.css';
 import './editor.css';
 import type { ConversationViewModel } from '../../conversation/conversationViewModel';
 import type { ConversationInteractionViewModel } from '../../conversation/conversationInteraction';
@@ -22,7 +22,7 @@ import {
   type ThreadListPageViewModel,
   type ThreadsHostToWebviewMessage,
   type ThreadsWebviewState
-} from '../threads/protocol';
+} from '../protocol';
 import {
   applyOptimisticRuntimeSettings,
   conversationPermissionOptions,
@@ -110,7 +110,7 @@ interface PendingConversationSuggestionSelection {
 
 declare function acquireVsCodeApi<T>(): VsCodeApi<T>;
 
-const vscode = acquireVsCodeApi<ThreadsWebviewState | import('./protocol').ConversationWebviewState>();
+const vscode = acquireVsCodeApi<ThreadsWebviewState | import('./state').ConversationWebviewState>();
 const editor = document.body.dataset.location === 'editor';
 const app = requiredElement<HTMLElement>('app');
 let persistedState = restoreThreadsWebviewState(editor ? {

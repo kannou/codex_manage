@@ -1,7 +1,7 @@
 import {
   MAX_SUGGESTION_QUERY_LENGTH,
   type ConversationSuggestionKind
-} from './protocol';
+} from '../protocol';
 
 export interface ComposerSuggestionTrigger {
   readonly kind: ConversationSuggestionKind;

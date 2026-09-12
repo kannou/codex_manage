@@ -7,7 +7,7 @@ import {
   isThreadsWebviewMessage,
   isThreadsWebviewState,
   restoreThreadsWebviewState
-} from '../../src/webview/threads/protocol';
+} from '../../src/webview/protocol';
 
 test('validates editor navigation and requires a correlated sidebar return', () => {
   assert.equal(isThreadsWebviewMessage({ type: 'threads/openEditor', threadId: 'thread-1' }), true);
@@ -738,4 +738,10 @@ test('restores group visibility and migrates version 1 navigation state', () => 
     listScrollTop: 0,
     expandedGroups: { pinned: true, active: true, archive: false }
   });
+});
+
+test('rejects obsolete read-only panel messages in the shared protocol', () => {
+  for (const type of ['conversation/ready', 'conversation/reload', 'conversation/openChangedFile', 'conversation/openFileLink']) {
+    assert.equal(isThreadsWebviewMessage({ type }), false);
+  }
 });

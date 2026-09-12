@@ -9,7 +9,7 @@ import {
   isThreadsWebviewMessage,
   restoreThreadsWebviewState,
   type ReduceMotionPreference
-} from '../webview/threads/protocol';
+} from '../webview/protocol';
 
 export interface ThreadListWebviewProviderOptions {
   readonly extensionUri: vscode.Uri;

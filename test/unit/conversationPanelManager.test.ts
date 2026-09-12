@@ -12,16 +12,20 @@ import { createThread, createTurn } from '../support/threadFixture';
 function createManager(t: TestContext, options: {
   extensionUri: vscode.Uri;
   readThread: (threadId: string) => Promise<Thread>;
+  onResume?: () => void;
   logger: { appendLine(value: string): void };
 }): { manager: ConversationPanelManager; coordinator: ConversationCoordinator } {
   const coordinator = new ConversationCoordinator({
     conversationClient: {
       readThread: async ({ threadId }) => ({ thread: await options.readThread(threadId) }),
-      resumeThread: async ({ threadId }) => ({
-        thread: createThread({ id: threadId }), model: 'gpt-fixture', modelProvider: 'openai',
-        serviceTier: null, cwd: 'D:\\workspace', instructionSources: [], approvalPolicy: 'on-request',
-        approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false }, reasoningEffort: 'medium'
-      }),
+      resumeThread: async ({ threadId }) => {
+        options.onResume?.();
+        return {
+          thread: createThread({ id: threadId }), model: 'gpt-fixture', modelProvider: 'openai',
+          serviceTier: null, cwd: 'D:\\workspace', instructionSources: [], approvalPolicy: 'on-request',
+          approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false }, reasoningEffort: 'medium'
+        };
+      },
       listModels: async () => ({ data: [], nextCursor: null }),
       startTurn: async () => { throw new Error('Unexpected turn/start'); },
       interruptTurn: async () => { throw new Error('Unexpected turn/interrupt'); }
@@ -401,11 +405,16 @@ test('closes the editor when its conversation is moved to the sidebar', async (t
 });
 
 test('restores only one editor tab even when saved tabs refer to different threads', async (t) => {
-  const { manager } = createManager(t, {
-    extensionUri: vscode.Uri.file('/extension'), readThread: async (id) => createThread({ id }),
+  let reads = 0;
+  let resumes = 0;
+  const { manager, coordinator } = createManager(t, {
+    extensionUri: vscode.Uri.file('/extension'),
+    readThread: async (id) => { reads += 1; return createThread({ id }); },
+    onResume: () => { resumes += 1; },
     logger: { appendLine: () => undefined }
   });
   t.after(() => manager.dispose());
+  coordinator.setConnectionStatus({ kind: 'ready' });
   const first = new FakeWebviewPanel();
   const second = new FakeWebviewPanel();
   await manager.deserializeWebviewPanel(first as unknown as vscode.WebviewPanel, {
@@ -416,8 +425,11 @@ test('restores only one editor tab even when saved tabs refer to different threa
   });
   assert.equal(first.disposed, false);
   assert.equal(second.disposed, true);
+  assert.equal(reads, 0);
   first.webview.fire({ type: 'threads/ready' });
   await flushPromises();
+  assert.equal(reads, 1);
+  assert.equal(resumes, 1);
   assert.ok(first.webview.postedMessages.some((message) =>
     (message as { type?: string }).type === 'threads/conversationLoaded'
   ));

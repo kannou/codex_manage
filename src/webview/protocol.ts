@@ -2,16 +2,16 @@ import type {
   ConversationItemViewModel,
   ConversationTurnViewModel,
   ConversationViewModel
-} from '../../conversation/conversationViewModel';
+} from '../conversation/conversationViewModel';
 import type {
   ConversationRuntimeSettings,
   ConversationRuntimeSettingsUpdate
-} from '../../conversation/conversationSession';
+} from '../conversation/conversationSession';
 import type {
   ConversationApprovalDecision,
   ConversationInteractionReply,
   ConversationInteractionViewModel
-} from '../../conversation/conversationInteraction';
+} from '../conversation/conversationInteraction';
 
 export const MAX_COMPOSER_TEXT_LENGTH = 100_000;
 export const MAX_CONVERSATION_ID_LENGTH = 512;

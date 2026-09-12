@@ -11,30 +11,7 @@
 }
 
 body {
-  margin: 0;
-  padding: 24px clamp(16px, 4vw, 48px) 48px;
   overflow-wrap: anywhere;
-}
-
-button {
-  font: inherit;
-}
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 8px 0 16px;
-  background: var(--vscode-editor-background);
-  border-bottom: 1px solid var(--vscode-widget-border);
-}
-
-.page-heading {
-  min-width: 0;
 }
 
 h1 {
@@ -48,26 +25,6 @@ h1 {
   color: var(--vscode-descriptionForeground);
 }
 
-#thread-meta {
-  margin: 6px 0 0;
-  overflow-wrap: anywhere;
-}
-
-.secondary-button {
-  flex: none;
-  padding: 6px 10px;
-  color: var(--vscode-button-secondaryForeground);
-  background: var(--vscode-button-secondaryBackground);
-  border: 1px solid transparent;
-  border-radius: 2px;
-  cursor: pointer;
-}
-
-.secondary-button:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
-}
-
-.secondary-button:focus-visible,
 summary:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
   outline-offset: 2px;
@@ -428,19 +385,6 @@ button.changed-file-path:hover {
 }
 
 @media (max-width: 520px) {
-  body {
-    padding-inline: 12px;
-  }
-
-  .page-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .secondary-button {
-    align-self: flex-start;
-  }
-
   .message-assistant {
     max-width: 100%;
   }
@@ -454,12 +398,10 @@ button.changed-file-path:hover {
   .changed-files,
   .changed-files-list,
   .activity-detail,
-  .turn-error,
-  .secondary-button {
+  .turn-error {
     border-color: CanvasText;
   }
 
-  .secondary-button:focus-visible,
   .changed-file-path:focus-visible,
   summary:focus-visible {
     outline: 2px solid Highlight;

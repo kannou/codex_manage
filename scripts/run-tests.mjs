@@ -22,7 +22,7 @@ const entryPoints = [
   'test/unit/conversationDuration.test.ts',
   'test/unit/conversationSuggestions.test.ts',
   'test/unit/conversationLatest.test.ts',
-  'test/unit/conversationProtocol.test.ts',
+  'test/unit/conversationState.test.ts',
   'test/unit/conversationReducer.test.ts',
   'test/unit/conversationQuality.test.ts',
   'test/unit/conversationSession.test.ts',

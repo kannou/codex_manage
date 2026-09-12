@@ -1,4 +1,4 @@
-import type { ConversationExecutionViewModel } from './protocol';
+import type { ConversationExecutionViewModel } from '../protocol';
 
 export interface ConversationActivityPresentation {
   readonly activityVisible: boolean;

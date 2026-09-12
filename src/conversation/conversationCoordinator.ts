@@ -19,7 +19,7 @@ import type { ThreadStartResponse } from '../codex/protocol/generated/v2/ThreadS
 import type { ThreadTokenUsage } from '../codex/protocol/generated/v2/ThreadTokenUsage';
 import type { ConversationConfigDefaults } from '../codex/protocol/guards';
 import { asError } from '../common/errors';
-import { conversationErrorMessage } from './conversationPanelManager';
+import { conversationErrorMessage } from './conversationError';
 import type {
   ConversationBookmark,
   TurnBookmarkStorage
@@ -57,7 +57,7 @@ import {
   type ReduceMotionPreference,
   type ThreadListSnapshotViewModel,
   type ThreadsHostToWebviewMessage
-} from '../webview/threads/protocol';
+} from '../webview/protocol';
 import type { ConnectionStatus } from '../views/threadTreeProvider';
 import { extractFencedCodeBlocks } from './fencedCode';
 import type { ConversationWorkspaceFolder } from './conversationChangedFiles';
@@ -576,7 +576,7 @@ export class ConversationCoordinator implements vscode.Disposable {
   }
 
   private async copyConversationContent(
-    message: Extract<import('../webview/threads/protocol').ThreadsWebviewToHostMessage, { type: 'threads/conversation/copy' }>
+    message: Extract<import('../webview/protocol').ThreadsWebviewToHostMessage, { type: 'threads/conversation/copy' }>
   ): Promise<void> {
     let outcome: 'accepted' | 'rejected' = 'rejected';
     if (this.isCurrentSession(message.sessionId, message.threadId)) {
@@ -613,7 +613,7 @@ export class ConversationCoordinator implements vscode.Disposable {
 
   private async openConversationChangedFile(
     message: Extract<
-      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      import('../webview/protocol').ThreadsWebviewToHostMessage,
       { type: 'threads/conversation/openChangedFile' }
     >
   ): Promise<void> {
@@ -631,7 +631,7 @@ export class ConversationCoordinator implements vscode.Disposable {
 
   private async openConversationFileLink(
     message: Extract<
-      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      import('../webview/protocol').ThreadsWebviewToHostMessage,
       { type: 'threads/conversation/openFileLink' }
     >
   ): Promise<void> {
@@ -1676,7 +1676,7 @@ export class ConversationCoordinator implements vscode.Disposable {
 
   private searchConversationSuggestions(
     message: Extract<
-      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      import('../webview/protocol').ThreadsWebviewToHostMessage,
       { type: 'threads/conversation/suggestion/search' }
     >
   ): void {
@@ -1790,7 +1790,7 @@ export class ConversationCoordinator implements vscode.Disposable {
 
   private selectConversationSuggestion(
     message: Extract<
-      import('../webview/threads/protocol').ThreadsWebviewToHostMessage,
+      import('../webview/protocol').ThreadsWebviewToHostMessage,
       { type: 'threads/conversation/suggestion/select' }
     >
   ): void {

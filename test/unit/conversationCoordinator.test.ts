@@ -11,7 +11,7 @@ import {
 } from '../../src/conversation/conversationCoordinator';
 import type { ConversationSessionClient } from '../../src/conversation/conversationSession';
 import type { ThreadResumeResponse } from '../../src/codex/protocol/generated/v2/ThreadResumeResponse';
-import type { ThreadsHostToWebviewMessage } from '../../src/webview/threads/protocol';
+import type { ThreadsHostToWebviewMessage } from '../../src/webview/protocol';
 import { createThread, createTurn } from '../support/threadFixture';
 
 class Presentation implements ConversationPresentation {
