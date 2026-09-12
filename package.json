@@ -97,6 +97,30 @@
         "title": "Restore Thread",
         "category": "Codex Thread Manager",
         "icon": "$(history)"
+      },
+      {
+        "command": "codexThreadManager.reloadConversation",
+        "title": "Reload Conversation",
+        "category": "Codex Thread Manager",
+        "enablement": "codexThreadManager.conversationFocused"
+      },
+      {
+        "command": "codexThreadManager.toggleConversationLocation",
+        "title": "Toggle Conversation Location",
+        "category": "Codex Thread Manager",
+        "enablement": "codexThreadManager.conversationFocused"
+      },
+      {
+        "command": "codexThreadManager.scrollConversationUp",
+        "title": "Scroll Conversation Up",
+        "category": "Codex Thread Manager",
+        "enablement": "codexThreadManager.conversationFocused"
+      },
+      {
+        "command": "codexThreadManager.scrollConversationDown",
+        "title": "Scroll Conversation Down",
+        "category": "Codex Thread Manager",
+        "enablement": "codexThreadManager.conversationFocused"
       }
     ],
     "keybindings": [
@@ -105,6 +129,30 @@
         "key": "ctrl+alt+enter",
         "mac": "cmd+alt+enter",
         "when": "codexThreadManager.conversationOpen"
+      },
+      {
+        "command": "codexThreadManager.reloadConversation",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "codexThreadManager.conversationFocused"
+      },
+      {
+        "command": "codexThreadManager.toggleConversationLocation",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "codexThreadManager.conversationFocused"
+      },
+      {
+        "command": "codexThreadManager.scrollConversationUp",
+        "key": "ctrl+pageup",
+        "mac": "ctrl+pageup",
+        "when": "codexThreadManager.conversationFocused"
+      },
+      {
+        "command": "codexThreadManager.scrollConversationDown",
+        "key": "ctrl+pagedown",
+        "mac": "ctrl+pagedown",
+        "when": "codexThreadManager.conversationFocused"
       }
     ],
     "menus": {
@@ -163,6 +211,13 @@
           ],
           "default": "standard",
           "description": "Default speed for new conversations."
+        },
+        "codexThreadManager.conversationScrollAmount": {
+          "type": "integer",
+          "default": 400,
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Distance in pixels to scroll the conversation with each scroll shortcut. Applies immediately."
         }
       }
     }

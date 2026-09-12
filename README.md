@@ -198,3 +198,7 @@ npm run generate:protocol
 ```
 
 Commit the dependency, generated snapshot, and compatibility-test changes together.
+
+With focus inside an existing conversation, use **Ctrl+Alt+R** to Reload and **Ctrl+Alt+M** to toggle between the editor and sidebar (**Cmd+Alt+R** / **Cmd+Alt+M** on macOS). These bindings work in the composer, transcript, and conversation menus, and are inactive in the thread list, unsent new conversations, other editors, and terminals. Customize them in VS Code Keyboard Shortcuts by searching for `Reload Conversation` or `Toggle Conversation Location`.
+
+Use **Ctrl+PageUp** / **Ctrl+PageDown** to scroll the focused conversation (Control on macOS too), without changing the composer caret. Configure the distance with **Conversation Scroll Amount** (`codexThreadManager.conversationScrollAmount`): default 400 pixels, integer range 1–10000. Changes apply on the next keypress.

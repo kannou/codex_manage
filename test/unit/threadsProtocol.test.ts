@@ -745,3 +745,14 @@ test('rejects obsolete read-only panel messages in the shared protocol', () => {
     assert.equal(isThreadsWebviewMessage({ type }), false);
   }
 });
+
+test('validates bounded scroll distances and the destination session', () => {
+  const message = { type: 'threads/scrollConversation', sessionId: 'session', threadId: 'thread', pixels: 400 };
+  for (const pixels of [1, -1, 10000, -10000]) {
+    assert.equal(isThreadsHostMessage({ ...message, pixels }), true);
+  }
+  for (const pixels of [0, 10001, -10001, 1.5, NaN, Infinity, '400']) {
+    assert.equal(isThreadsHostMessage({ ...message, pixels }), false);
+  }
+  assert.equal(isThreadsHostMessage({ ...message, sessionId: '' }), false);
+});

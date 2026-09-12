@@ -92,6 +92,8 @@ export interface ConversationCoordinatorOptions {
   readonly onConversationCreated?: (thread: Thread) => void;
   readonly renameConversationThread?: (threadId: string, name: string) => Promise<void>;
   readonly onConversationScreenChange?: (open: boolean) => void;
+  readonly readConversationScrollAmount?: () => number;
+  readonly onConversationFocusChange?: (focused: boolean) => void;
   readonly onListRefreshRequested?: () => void;
   readonly onOpenEditor?: (reference: { readonly id: string; readonly title: string }) => void;
   readonly revealSidebar?: () => Promise<void>;
@@ -343,7 +345,7 @@ export class ConversationCoordinator implements vscode.Disposable {
       },
       visibilityChanged: () => {
         if (this.presentationBinding === binding && !presentation.isVisible()) {
-          this.webviewFocused = false;
+          this.setWebviewFocused(false);
         }
       },
       dispose: () => {
@@ -405,7 +407,7 @@ export class ConversationCoordinator implements vscode.Disposable {
     this.setConversationScreenOpen(false);
     this.pendingRestoreThreadId = undefined;
     this.viewReady = false;
-    this.webviewFocused = false;
+    this.setWebviewFocused(false);
     this.presentation = undefined;
     this.presentationBinding = undefined;
   }
@@ -421,7 +423,7 @@ export class ConversationCoordinator implements vscode.Disposable {
         }
         return;
       case 'threads/viewFocus':
-        this.webviewFocused = message.focused && this.presentation?.isVisible() === true;
+        this.setWebviewFocused(message.focused && this.presentation?.isVisible() === true);
         return;
       case 'threads/open':
         this.openConversation(message.threadId);
@@ -910,6 +912,41 @@ export class ConversationCoordinator implements vscode.Disposable {
       );
     }
     this.postCurrentConversationState();
+  }
+
+  public scrollFocusedConversation(direction: 'up' | 'down'): void {
+    if (!this.canRunConversationShortcut() || !this.conversationSessionId) return;
+    const configured = this.options.readConversationScrollAmount?.() ?? 400;
+    const amount = Number.isInteger(configured) && configured >= 1 && configured <= 10000 ? configured : 400;
+    this.post({
+      type: 'threads/scrollConversation', sessionId: this.conversationSessionId,
+      threadId: this.activeThread!.id, pixels: direction === 'up' ? -amount : amount
+    });
+  }
+
+  public reloadFocusedConversation(): void {
+    if (!this.canRunConversationShortcut()) return;
+    this.reloadConversation();
+  }
+
+  public toggleFocusedConversationLocation(): void {
+    if (!this.canRunConversationShortcut() || this.pendingSidebarNavigation) return;
+    const threadId = this.activeThread!.id;
+    if (this.presentationBinding?.location === 'editor') {
+      void this.openSidebar(threadId);
+    } else {
+      this.openEditor(threadId);
+    }
+  }
+
+  private canRunConversationShortcut(): boolean {
+    return !this.disposed && this.viewReady && this.conversationScreenOpen &&
+      this.webviewFocused && this.presentation?.isVisible() === true && Boolean(this.activeThread);
+  }
+
+  private setWebviewFocused(focused: boolean): void {
+    this.webviewFocused = focused;
+    this.options.onConversationFocusChange?.(focused && this.conversationScreenOpen && Boolean(this.activeThread));
   }
 
   public focusConversationPrompt(): boolean {
@@ -2588,6 +2625,7 @@ export class ConversationCoordinator implements vscode.Disposable {
   private setConversationScreenOpen(open: boolean): void {
     if (this.conversationScreenOpen === open) return;
     this.conversationScreenOpen = open;
+    this.options.onConversationFocusChange?.(open && this.webviewFocused && Boolean(this.activeThread));
     this.options.onConversationScreenChange?.(open);
   }
 

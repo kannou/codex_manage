@@ -741,3 +741,91 @@ test('keeps context usage across presentation changes and routes account usage t
   await flush();
   assert.deepEqual(sidebar.presentation.state().contextWindow, expected);
 });
+
+test('reload shortcut requires focus on the visible conversation and coalesces repeated reloads', async (t) => {
+  const focus: boolean[] = [];
+  const { coordinator, client, calls } = setup(t, { onConversationFocusChange: (value) => focus.push(value) });
+  const sidebar = await open(coordinator);
+  coordinator.reloadFocusedConversation();
+  assert.equal(calls.resumes, 1);
+  let finish!: (value: ThreadResumeResponse) => void;
+  let reloads = 0;
+  client.resumeThread = () => { reloads += 1; return new Promise((resolve) => { finish = resolve; }); };
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  assert.equal(focus.at(-1), true);
+  coordinator.reloadFocusedConversation();
+  coordinator.reloadFocusedConversation();
+  assert.equal(reloads, 1);
+  finish(resumeResponse());
+  await flush();
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: false });
+  coordinator.reloadFocusedConversation();
+  assert.equal(reloads, 1);
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  sidebar.presentation.visible = false;
+  sidebar.connection.visibilityChanged();
+  assert.equal(focus.at(-1), false);
+  coordinator.reloadFocusedConversation();
+  assert.equal(reloads, 1);
+  sidebar.presentation.visible = true;
+  sidebar.connection.handleMessage({ type: 'threads/back' });
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  assert.equal(focus.at(-1), false);
+  coordinator.reloadFocusedConversation();
+  assert.equal(reloads, 1);
+});
+
+test('toggle shortcut switches both ways only from the focused conversation and preserves drafts', async (t) => {
+  const opened: string[] = [];
+  const { coordinator, calls } = setup(t, { onOpenEditor: (reference) => opened.push(reference.id) });
+  const sidebar = await open(coordinator);
+  sidebar.connection.handleMessage({ type: 'threads/conversation/draft/update', sessionId: sidebar.sessionId,
+    threadId: 'thread-1', text: 'Shortcut draft' });
+  coordinator.toggleFocusedConversationLocation();
+  assert.deepEqual(opened, []);
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  coordinator.toggleFocusedConversationLocation();
+  assert.deepEqual(opened, ['thread-1']);
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: false });
+  const editor = await openEditor(coordinator);
+  assert.equal(editor.presentation.state().draftText, 'Shortcut draft');
+  // The passive sidebar cannot give the active editor keyboard ownership.
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  coordinator.toggleFocusedConversationLocation();
+  assert.equal(editor.presentation.state().sessionId, editor.sessionId);
+  editor.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  coordinator.toggleFocusedConversationLocation();
+  await flush();
+  assert.equal(sidebar.presentation.state().draftText, 'Shortcut draft');
+  assert.notEqual(sidebar.presentation.state().sessionId, sidebar.sessionId);
+  assert.equal(calls.resumes, 1);
+  assert.equal(calls.starts, 0);
+});
+
+test('scroll shortcuts read the current distance and reject unfocused or stale presentations', async (t) => {
+  let amount = 400;
+  const { coordinator } = setup(t, { readConversationScrollAmount: () => amount });
+  const sidebar = await open(coordinator);
+  const scrolls = () => sidebar.presentation.messages.filter((message) => message.type === 'threads/scrollConversation');
+  coordinator.scrollFocusedConversation('down');
+  assert.equal(scrolls().length, 0);
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  coordinator.scrollFocusedConversation('down');
+  assert.deepEqual(scrolls().at(-1), { type: 'threads/scrollConversation', sessionId: sidebar.sessionId,
+    threadId: 'thread-1', pixels: 400 });
+  amount = 125;
+  coordinator.scrollFocusedConversation('up');
+  assert.equal(scrolls().at(-1)?.pixels, -125);
+  amount = Number.NaN;
+  coordinator.scrollFocusedConversation('down');
+  assert.equal(scrolls().at(-1)?.pixels, 400);
+  const editor = await openEditor(coordinator);
+  sidebar.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  coordinator.scrollFocusedConversation('down');
+  assert.equal(editor.presentation.messages.some((message) => message.type === 'threads/scrollConversation'), false);
+  editor.connection.handleMessage({ type: 'threads/viewFocus', focused: true });
+  coordinator.scrollFocusedConversation('up');
+  assert.deepEqual(editor.presentation.messages.at(-1), { type: 'threads/scrollConversation', sessionId: editor.sessionId,
+    threadId: 'thread-1', pixels: -400 });
+  assert.equal(scrolls().length, 3);
+});

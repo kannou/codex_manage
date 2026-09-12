@@ -440,6 +440,11 @@ function handleHostMessage(message: ThreadsHostToWebviewMessage): void {
     case 'threads/reduceMotion':
       document.body.dataset.reduceMotion = message.preference;
       return;
+    case 'threads/scrollConversation':
+      if (document.hasFocus() && isActiveConversation(message.sessionId, message.threadId)) {
+        window.scrollBy({ top: message.pixels, behavior: 'instant' });
+      }
+      return;
     case 'threads/focusConversationPrompt':
       focusConversationPrompt(message.sessionId, message.threadId);
       return;

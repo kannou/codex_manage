@@ -14,6 +14,7 @@ import { ConversationCoordinator } from './conversation/conversationCoordinator'
 import { ThreadListWebviewProvider } from './views/threadListWebviewProvider';
 
 let activeClient: AppServerClient | undefined;
+const CONVERSATION_FOCUSED_CONTEXT_KEY = 'codexThreadManager.conversationFocused';
 const CONVERSATION_OPEN_CONTEXT_KEY = 'codexThreadManager.conversationOpen';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -109,6 +110,11 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     onOpenEditor: (reference) => conversationPanels.openThread(reference),
     revealSidebar: async () => { await vscode.commands.executeCommand('codexThreadManager.threads.focus'); },
+    readConversationScrollAmount: () => vscode.workspace.getConfiguration('codexThreadManager')
+      .get<number>('conversationScrollAmount', 400),
+    onConversationFocusChange: (focused) => {
+      void vscode.commands.executeCommand('setContext', CONVERSATION_FOCUSED_CONTEXT_KEY, focused);
+    },
     onConversationScreenChange: (open) => {
       void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, open);
     },
@@ -252,6 +258,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('codexThreadManager.openThread', (threadId?: string) =>
       openThread(threadId, repository, conversationPanels)
     ),
+    vscode.commands.registerCommand('codexThreadManager.scrollConversationUp', () => coordinator.scrollFocusedConversation('up')),
+    vscode.commands.registerCommand('codexThreadManager.scrollConversationDown', () => coordinator.scrollFocusedConversation('down')),
+    vscode.commands.registerCommand('codexThreadManager.reloadConversation', () => coordinator.reloadFocusedConversation()),
+    vscode.commands.registerCommand('codexThreadManager.toggleConversationLocation', () => coordinator.toggleFocusedConversationLocation()),
     vscode.commands.registerCommand('codexThreadManager.focusConversationPrompt', async () => {
       if (!conversationPanels.focusPrompt()) {
         await vscode.commands.executeCommand('codexThreadManager.threads.focus');
@@ -269,6 +279,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   output.appendLine('Codex Thread Manager activated.');
   void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, false);
+  void vscode.commands.executeCommand('setContext', CONVERSATION_FOCUSED_CONTEXT_KEY, false);
   void requestThreadRefresh(true);
 }
 

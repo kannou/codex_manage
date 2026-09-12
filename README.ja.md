@@ -198,3 +198,7 @@ npm run generate:protocol
 ```
 
 依存関係、生成済みスナップショット、互換性テストの変更は、まとめてコミットしてください。
+
+会話内にフォーカスがある場合、**Ctrl+Alt+R** で Reload、**Ctrl+Alt+M** でエディター／サイドバーの表示先をトグルできます。macOS では **Cmd+Alt+R**／**Cmd+Alt+M** です。入力欄・会話履歴・会話内メニューが対象で、スレッド一覧、未送信の新規会話、他のエディターやターミナルでは実行しません。割り当ては VS Code のキーボードショートカット設定で `Reload Conversation`／`Toggle Conversation Location` を検索して変更できます。
+
+**Ctrl+PageUp**／**Ctrl+PageDown** で会話を上下にスクロールできます（macOS も Control）。会話にフォーカスがある場合だけ有効で、入力欄のカーソル位置は変更しません。1回の移動量は設定の **Conversation Scroll Amount**（`codexThreadManager.conversationScrollAmount`）で指定します。初期値は400ピクセル、設定範囲は1〜10000の整数で、変更は次のキー操作から反映されます。

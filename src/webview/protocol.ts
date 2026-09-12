@@ -292,6 +292,7 @@ export type ThreadsWebviewToHostMessage =
   };
 
 export type ThreadsHostToWebviewMessage =
+  | { readonly type: 'threads/scrollConversation'; readonly sessionId: string; readonly threadId: string; readonly pixels: number }
   | {
     readonly type: 'threads/listState';
     readonly snapshot: ThreadListSnapshotViewModel;
@@ -609,6 +610,11 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
     case 'threads/conversationUsage':
       return (value.status === 'loading' || value.status === 'unavailable' ||
         (value.status === 'ready' && isUsageSnapshot(value.usage)));
+    case 'threads/scrollConversation':
+      return hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'pixels']) &&
+        isBoundedId(value.sessionId) && isBoundedId(value.threadId) &&
+        typeof value.pixels === 'number' && Number.isInteger(value.pixels) &&
+        Math.abs(value.pixels) >= 1 && Math.abs(value.pixels) <= 10000;
     case 'threads/focusConversationPrompt':
       return (
         hasOnlyKeys(value, ['type', 'sessionId', 'threadId']) &&

@@ -157,3 +157,15 @@ npm test
 ```
 
 Do not extend this smoke test with rename or archive operations against a user's normal Codex home.
+
+## Conversation keyboard shortcuts
+
+- In an existing conversation's composer, transcript, and menus, use Ctrl+Alt+R (macOS: Cmd+Alt+R) and confirm the current conversation reloads once, retaining draft text and attachments.
+- Use Ctrl+Alt+M (macOS: Cmd+Alt+M) to toggle editor/sidebar, including during streaming. Confirm the draft and active turn survive and no extra turn starts.
+- Repeat from the thread list, an unsent new conversation, another text editor, terminal, and the passive sidebar while the editor owns the conversation. Neither command should act on the conversation.
+- Hide or close the view, switch windows, and return; verify stale focus does not activate these bindings outside the conversation.
+- Confirm both commands can be rebound through VS Code Keyboard Shortcuts and the existing prompt-focus shortcut still works.
+
+- With focus in the composer and transcript, use Ctrl+PageUp/PageDown (also Control on macOS). Confirm the conversation scrolls instead of changing tabs, while the composer caret and draft remain unchanged. Repeat while streaming and after toggling presentation.
+- Change `codexThreadManager.conversationScrollAmount` from 400 to 100 and then 800. The next keypress should use the new pixel distance; at the beginning/end of the document it should stop at the boundary.
+- Focus a different editor or terminal and confirm these bindings no longer scroll Codex Thread Manager. On macOS laptops without dedicated PageUp/PageDown keys, check the equivalent Fn+arrow combinations.
