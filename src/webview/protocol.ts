@@ -2,16 +2,16 @@ import type {
   ConversationItemViewModel,
   ConversationTurnViewModel,
   ConversationViewModel
-} from '../../conversation/conversationViewModel';
+} from '../conversation/conversationViewModel';
 import type {
   ConversationRuntimeSettings,
   ConversationRuntimeSettingsUpdate
-} from '../../conversation/conversationSession';
+} from '../conversation/conversationSession';
 import type {
   ConversationApprovalDecision,
   ConversationInteractionReply,
   ConversationInteractionViewModel
-} from '../../conversation/conversationInteraction';
+} from '../conversation/conversationInteraction';
 
 export const MAX_COMPOSER_TEXT_LENGTH = 100_000;
 export const MAX_CONVERSATION_ID_LENGTH = 512;
@@ -166,6 +166,8 @@ export type ThreadsWebviewToHostMessage =
   | { readonly type: 'threads/viewFocus'; readonly focused: boolean }
   | { readonly type: 'threads/new' }
   | { readonly type: 'threads/open'; readonly threadId: string }
+  | { readonly type: 'threads/openEditor'; readonly threadId: string }
+  | { readonly type: 'threads/openSidebar'; readonly sessionId: string; readonly threadId: string }
   | { readonly type: 'threads/back' }
   | { readonly type: 'threads/reload' }
   | { readonly type: 'threads/conversation/usage/read' }
@@ -290,6 +292,7 @@ export type ThreadsWebviewToHostMessage =
   };
 
 export type ThreadsHostToWebviewMessage =
+  | { readonly type: 'threads/scrollConversation'; readonly sessionId: string; readonly threadId: string; readonly pixels: number }
   | {
     readonly type: 'threads/listState';
     readonly snapshot: ThreadListSnapshotViewModel;
@@ -424,8 +427,12 @@ export function isThreadsWebviewMessage(value: unknown): value is ThreadsWebview
   if (value.type === 'threads/viewFocus') {
     return hasOnlyKeys(value, ['type', 'focused']) && typeof value.focused === 'boolean';
   }
-  if (value.type === 'threads/open') {
-    return isBoundedId(value.threadId);
+  if (value.type === 'threads/open' || value.type === 'threads/openEditor') {
+    return hasOnlyKeys(value, ['type', 'threadId']) && isBoundedId(value.threadId);
+  }
+  if (value.type === 'threads/openSidebar') {
+    return hasOnlyKeys(value, ['type', 'sessionId', 'threadId']) &&
+      isBoundedId(value.sessionId) && isBoundedId(value.threadId);
   }
   if (value.type === 'threads/new') {
     return hasOnlyKeys(value, ['type']);
@@ -603,6 +610,11 @@ export function isThreadsHostMessage(value: unknown): value is ThreadsHostToWebv
     case 'threads/conversationUsage':
       return (value.status === 'loading' || value.status === 'unavailable' ||
         (value.status === 'ready' && isUsageSnapshot(value.usage)));
+    case 'threads/scrollConversation':
+      return hasOnlyKeys(value, ['type', 'sessionId', 'threadId', 'pixels']) &&
+        isBoundedId(value.sessionId) && isBoundedId(value.threadId) &&
+        typeof value.pixels === 'number' && Number.isInteger(value.pixels) &&
+        Math.abs(value.pixels) >= 1 && Math.abs(value.pixels) <= 10000;
     case 'threads/focusConversationPrompt':
       return (
         hasOnlyKeys(value, ['type', 'sessionId', 'threadId']) &&

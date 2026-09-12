@@ -1,23 +1,12 @@
 import * as vscode from 'vscode';
-import type { Thread } from '../codex/protocol/generated/v2/Thread';
-import { AppServerError, asError } from '../common/errors';
+import type { ConversationCoordinator, ConversationViewConnection } from './conversationCoordinator';
 import {
   createConversationWebviewHtml,
   configureConversationWebview,
   conversationWebviewRoot
 } from './conversationWebview';
-import { toConversationViewModel } from './conversationViewModel';
-import {
-  isConversationWebviewMessage,
-  isConversationWebviewState,
-  type ConversationHostToWebviewMessage,
-  type ConversationWebviewState
-} from '../webview/conversation/protocol';
-import {
-  resolveConversationChangedFiles,
-  type ConversationWorkspaceFolder
-} from './conversationChangedFiles';
-import { openConversationFileLink } from './conversationFileLink';
+import { isConversationWebviewState } from '../webview/conversation/state';
+import { isThreadsWebviewMessage, type ThreadsHostToWebviewMessage } from '../webview/protocol';
 
 export const CONVERSATION_VIEW_TYPE = 'codexThreadManager.conversation';
 
@@ -32,24 +21,20 @@ export interface ConversationPanelLogger {
 
 export interface ConversationPanelManagerOptions {
   readonly extensionUri: vscode.Uri;
-  readonly readThread: (threadId: string) => Promise<Thread>;
+  readonly coordinator: ConversationCoordinator;
   readonly logger: ConversationPanelLogger;
 }
 
 export class ConversationPanelManager implements vscode.WebviewPanelSerializer, vscode.Disposable {
-  private readonly panels = new Map<string, ManagedConversationPanel>();
+  private managed: ManagedConversationPanel | undefined;
 
   public constructor(private readonly options: ConversationPanelManagerOptions) {}
 
   public openThread(reference: ConversationThreadReference): void {
-    const existing = this.panels.get(reference.id);
-    if (existing) {
-      existing.updateReference(reference);
-      existing.reveal();
-      existing.reload();
+    if (this.managed?.threadId === reference.id) {
+      this.managed.reveal();
       return;
     }
-
     const panel = vscode.window.createWebviewPanel(
       CONVERSATION_VIEW_TYPE,
       reference.title,
@@ -59,231 +44,131 @@ export class ConversationPanelManager implements vscode.WebviewPanelSerializer, 
         enableForms: false,
         enableCommandUris: false,
         enableFindWidget: true,
-        retainContextWhenHidden: false,
+        retainContextWhenHidden: true,
         localResourceRoots: [conversationWebviewRoot(this.options.extensionUri)]
       }
     );
     this.attach(panel, reference);
   }
 
-  public async deserializeWebviewPanel(
-    webviewPanel: vscode.WebviewPanel,
-    state: unknown
-  ): Promise<void> {
+  public focusPrompt(): boolean {
+    if (!this.managed) return false;
+    this.managed.focusPrompt();
+    return true;
+  }
+
+  public async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown): Promise<void> {
     if (!isConversationWebviewState(state)) {
-      webviewPanel.dispose();
+      panel.dispose();
       await vscode.window.showWarningMessage(
         'Codex Thread Manager could not restore a conversation tab because its saved state was invalid.'
       );
       return;
     }
-
-    const existing = this.panels.get(state.threadId);
-    if (existing) {
-      existing.reveal();
-      webviewPanel.dispose();
+    // Only one restored tab may take ownership of the conversation presentation.
+    if (this.managed) {
+      panel.dispose();
       return;
     }
-
-    this.attach(webviewPanel, {
-      id: state.threadId,
-      title: state.title || 'Codex thread'
-    });
+    this.attach(panel, { id: state.threadId, title: state.title || 'Codex thread' });
   }
 
   public dispose(): void {
-    for (const panel of this.panels.values()) {
-      panel.detach();
-    }
-    this.panels.clear();
+    this.managed?.close();
+    this.managed = undefined;
   }
 
   private attach(panel: vscode.WebviewPanel, reference: ConversationThreadReference): void {
+    this.managed?.close();
     const managed = new ManagedConversationPanel(panel, reference, this.options, () => {
-      if (this.panels.get(reference.id) === managed) {
-        this.panels.delete(reference.id);
-      }
+      if (this.managed === managed) this.managed = undefined;
     });
-    this.panels.set(reference.id, managed);
+    this.managed = managed;
   }
 }
 
 class ManagedConversationPanel {
   private readonly disposables: vscode.Disposable[] = [];
-  private generation = 0;
-  private ready = false;
-  private disposed = false;
-  private reference: ConversationThreadReference;
-  private thread: Thread | undefined;
+  private readonly connection: ConversationViewConnection;
+  public readonly threadId: string;
+  private webviewFocused = false;
+  private pendingPromptFocus = false;
 
   public constructor(
     private readonly panel: vscode.WebviewPanel,
     reference: ConversationThreadReference,
     private readonly options: ConversationPanelManagerOptions,
-    private readonly onDispose: () => void
+    onDispose: () => void
   ) {
-    this.reference = reference;
+    this.threadId = reference.id;
     configureConversationWebview(panel.webview, options.extensionUri);
     panel.title = reference.title;
-    panel.webview.html = createConversationWebviewHtml(
-      panel.webview,
-      options.extensionUri,
-      this.webviewState()
-    );
-
+    panel.webview.html = createConversationWebviewHtml(panel.webview, options.extensionUri, {
+      version: 1, threadId: reference.id, title: reference.title
+    });
+    this.connection = options.coordinator.attachPresentation({
+      postMessage: (message) => this.post(message),
+      isVisible: () => panel.visible && panel.active,
+      setUnreadCount: () => undefined,
+      deactivate: () => this.close()
+    }, reference.id, reference);
     this.disposables.push(
       panel.webview.onDidReceiveMessage((message: unknown) => {
-        if (!isConversationWebviewMessage(message)) {
-          this.options.logger.appendLine(
-            `[conversation] Ignored an invalid webview message for thread ${this.reference.id}.`
-          );
+        if (!isThreadsWebviewMessage(message)) {
+          options.logger.appendLine('[conversation] Ignored an invalid Webview message.');
           return;
         }
-        if (message.type === 'conversation/openChangedFile') {
-          void this.openChangedFile(message.turnId, message.fileId);
-          return;
+        if (message.type === 'threads/viewFocus') this.webviewFocused = message.focused;
+        this.connection.handleMessage(message);
+        this.completePromptFocus();
+      }),
+      panel.onDidChangeViewState(() => {
+        if (!panel.active || !panel.visible) {
+          this.webviewFocused = false;
+          this.pendingPromptFocus = false;
         }
-        if (message.type === 'conversation/openFileLink') {
-          void this.openFileLink(message.fileLink);
-          return;
-        }
-        this.ready = true;
-        this.reload();
+        this.connection.visibilityChanged();
       }),
       panel.onDidDispose(() => {
-        this.disposed = true;
-        this.generation += 1;
-        this.disposeListeners();
-        this.onDispose();
+        this.connection.dispose();
+        while (this.disposables.length) this.disposables.pop()?.dispose();
+        onDispose();
       })
     );
   }
 
-  public updateReference(reference: ConversationThreadReference): void {
-    this.reference = reference;
-    this.panel.title = reference.title;
-  }
-
   public reveal(): void {
-    this.panel.reveal(vscode.ViewColumn.Active, false);
+    this.panel.reveal(undefined, false);
   }
 
-  public reload(): void {
-    if (!this.ready || this.disposed) {
-      return;
-    }
-
-    const generation = ++this.generation;
-    void this.post({ type: 'conversation/loading' });
-    void this.options.readThread(this.reference.id).then(
-      async (thread) => {
-        if (this.disposed || generation !== this.generation) {
-          return;
-        }
-        this.thread = thread;
-        const model = toConversationViewModel(thread, currentConversationWorkspaceFolders());
-        this.reference = { id: model.threadId, title: model.title };
-        this.panel.title = model.title;
-        await this.post({ type: 'conversation/loaded', model });
-        this.options.logger.appendLine(
-          `[conversation] Loaded ${model.turns.length} turn(s) for thread ${model.threadId}.`
-        );
-      },
-      async (error: unknown) => {
-        if (this.disposed || generation !== this.generation) {
-          return;
-        }
-        this.options.logger.appendLine(
-          `[conversation] Could not load thread ${this.reference.id}: ${asError(error).message}`
-        );
-        await this.post({
-          type: 'conversation/error',
-          message: conversationErrorMessage(error)
-        });
-      }
-    );
-  }
-
-  public detach(): void {
-    this.disposed = true;
-    this.generation += 1;
-    this.disposeListeners();
-  }
-
-  private async openChangedFile(turnId: string, fileId: string): Promise<void> {
-    const file = this.thread
-      ? resolveConversationChangedFiles(this.thread, currentConversationWorkspaceFolders())
-        .get(turnId)
-        ?.find((candidate) => candidate.id === fileId && candidate.canOpen)
-      : undefined;
-    if (!file) return;
-    try {
-      await vscode.window.showTextDocument(vscode.Uri.file(file.absolutePath));
-    } catch (error) {
-      this.options.logger.appendLine(
-        `[conversation] Could not open a changed file for thread ${this.reference.id}: ${asError(error).message}`
-      );
+  public focusPrompt(): void {
+    this.pendingPromptFocus = true;
+    if (this.panel.active && this.panel.visible && this.webviewFocused) {
+      this.completePromptFocus();
+    } else {
+      // Wait for the Webview's focus acknowledgement before focusing its input.
+      this.reveal();
     }
   }
 
-  private async openFileLink(target: string): Promise<void> {
-    if (!this.thread) return;
-    try {
-      await openConversationFileLink(
-        target,
-        this.thread.cwd,
-        currentConversationWorkspaceFolders()
-      );
-    } catch (error) {
-      this.options.logger.appendLine(
-        `[conversation] Could not open a linked file for thread ${this.reference.id}: ${asError(error).message}`
-      );
+  private completePromptFocus(): void {
+    if (!this.pendingPromptFocus || !this.webviewFocused || !this.panel.active || !this.panel.visible) return;
+    this.pendingPromptFocus = false;
+    if (!this.options.coordinator.focusConversationPrompt()) this.pendingPromptFocus = true;
+  }
+
+  public close(): void {
+    this.panel.dispose();
+  }
+
+  private post(message: ThreadsHostToWebviewMessage): void {
+    if (message.type === 'threads/conversationLoaded' || message.type === 'threads/conversationState' ||
+        message.type === 'threads/conversationCreated') {
+      this.panel.title = message.state.model.title;
+    }
+    void this.panel.webview.postMessage(message);
+    if (message.type === 'threads/conversationLoaded' || message.type === 'threads/conversationState') {
+      this.completePromptFocus();
     }
   }
-
-  private webviewState(): ConversationWebviewState {
-    return {
-      version: 1,
-      threadId: this.reference.id,
-      title: this.reference.title
-    };
-  }
-
-  private post(message: ConversationHostToWebviewMessage): Thenable<boolean> {
-    return this.panel.webview.postMessage(message);
-  }
-
-  private disposeListeners(): void {
-    while (this.disposables.length > 0) {
-      this.disposables.pop()?.dispose();
-    }
-  }
-}
-
-function currentConversationWorkspaceFolders(): readonly ConversationWorkspaceFolder[] {
-  return (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
-    path: folder.uri.fsPath,
-    name: folder.name
-  }));
-}
-
-export function conversationErrorMessage(error: unknown): string {
-  if (error instanceof AppServerError) {
-    switch (error.code) {
-      case 'cli-not-found':
-        return 'Codex CLI was not found. Open the extension settings and configure codexPath.';
-      case 'request-timeout':
-        return 'Codex App Server timed out while loading this conversation.';
-      case 'incompatible-cli':
-      case 'protocol-error':
-        return 'This Codex CLI returned an incompatible conversation history response.';
-      case 'connection-closed':
-      case 'process-start-failed':
-      case 'disposed':
-        return 'The Codex App Server connection is unavailable. Reload the history to reconnect.';
-      case 'request-failed':
-        return 'Codex App Server could not read this thread.';
-    }
-  }
-  return 'An unexpected error occurred while loading this conversation.';
 }

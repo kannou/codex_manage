@@ -684,7 +684,8 @@ function isTextElement(value: unknown): boolean {
 }
 
 function isOptionalImageDetail(value: unknown): boolean {
-  return value === undefined || isOneOf(value, ['auto', 'low', 'high', 'original']);
+  // Newer App Servers also serialize an unspecified image detail as null.
+  return value === undefined || value === null || isOneOf(value, ['auto', 'low', 'high', 'original']);
 }
 
 function isMemoryCitation(value: unknown): boolean {

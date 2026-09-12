@@ -10,9 +10,11 @@ import {
 import { PinStore } from './state/pinStore';
 import { TurnBookmarkStore } from './state/turnBookmarkStore';
 import { ThreadTreeItem } from './views/threadTreeProvider';
+import { ConversationCoordinator } from './conversation/conversationCoordinator';
 import { ThreadListWebviewProvider } from './views/threadListWebviewProvider';
 
 let activeClient: AppServerClient | undefined;
+const CONVERSATION_FOCUSED_CONTEXT_KEY = 'codexThreadManager.conversationFocused';
 const CONVERSATION_OPEN_CONTEXT_KEY = 'codexThreadManager.conversationOpen';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -34,14 +36,14 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     client.onNotification((notification) => {
       output.appendLine(`[app-server] Notification: ${notification.method}`);
-      provider.handleNotification(notification);
+      coordinator.handleNotification(notification);
       if (repository?.handleThreadNotification(notification.method, notification.params)) {
         repository.setPinnedThreadIds(pinStore.getPinnedThreadIds());
-        provider.setSnapshot(repository.snapshot());
+        coordinator.setSnapshot(repository.snapshot());
       }
     });
     client.onServerRequest((request) => {
-      provider.handleServerRequest(request);
+      coordinator.handleServerRequest(request);
     });
     client.onDidDisconnect((error) => {
       if (client !== activeClient) {
@@ -49,33 +51,27 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       probeGeneration += 1;
-      provider.setConnectionStatus({ kind: 'error', message: connectionErrorMessage(error) });
+      coordinator.setConnectionStatus({ kind: 'error', message: connectionErrorMessage(error) });
     });
     return client;
   };
 
   const replaceClient = (): AppServerClient => {
     probeGeneration += 1;
-    provider.markConversationDisconnected();
+    coordinator.markConversationDisconnected();
     activeClient?.dispose();
     activeClient = createClient();
     repository = new ThreadRepository(activeClient);
     repository.setPinnedThreadIds(pinStore.getPinnedThreadIds());
-    provider.setSnapshot(repository.snapshot());
+    coordinator.setSnapshot(repository.snapshot());
     return activeClient;
-  };
-
-  const readThread = async (threadId: string) => {
-    const client = activeClient ?? replaceClient();
-    return (await client.readThread({ threadId, includeTurns: true })).thread;
   };
 
   const threadRefreshRunner = createCoalescingTaskRunner(refreshThreads);
   const requestThreadRefresh = (notifyOnError: boolean): Promise<void> =>
     threadRefreshRunner.run(notifyOnError);
 
-  const provider = new ThreadListWebviewProvider({
-    extensionUri: context.extensionUri,
+  const coordinator = new ConversationCoordinator({
     turnBookmarkStore,
     conversationClient: {
       readThread: (params) => (activeClient ?? replaceClient()).readThread(params),
@@ -101,7 +97,7 @@ export function activate(context: vscode.ExtensionContext): void {
       .get<'auto' | 'on' | 'off'>('reduceMotion', 'auto'),
     onConversationCreated: (thread) => {
       repository?.upsertThread(thread);
-      if (repository) provider.setSnapshot(repository.snapshot());
+      if (repository) coordinator.setSnapshot(repository.snapshot());
     },
     renameConversationThread: async (threadId, name) => {
       const repo = repository;
@@ -110,7 +106,14 @@ export function activate(context: vscode.ExtensionContext): void {
         throw new Error('The thread is not available for renaming.');
       }
       await repo.renameThread(threadId, name);
-      provider.setSnapshot(repo.snapshot());
+      coordinator.setSnapshot(repo.snapshot());
+    },
+    onOpenEditor: (reference) => conversationPanels.openThread(reference),
+    revealSidebar: async () => { await vscode.commands.executeCommand('codexThreadManager.threads.focus'); },
+    readConversationScrollAmount: () => vscode.workspace.getConfiguration('codexThreadManager')
+      .get<number>('conversationScrollAmount', 400),
+    onConversationFocusChange: (focused) => {
+      void vscode.commands.executeCommand('setContext', CONVERSATION_FOCUSED_CONTEXT_KEY, focused);
     },
     onConversationScreenChange: (open) => {
       void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, open);
@@ -122,14 +125,23 @@ export function activate(context: vscode.ExtensionContext): void {
     logger: output
   });
 
+  const provider = new ThreadListWebviewProvider({
+    extensionUri: context.extensionUri,
+    coordinator,
+    readReduceMotion: () => vscode.workspace
+      .getConfiguration('workbench')
+      .get<'auto' | 'on' | 'off'>('reduceMotion', 'auto'),
+    logger: output
+  });
+
   async function refreshThreads(notifyOnError: boolean): Promise<void> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders?.length) {
       probeGeneration += 1;
-      provider.setConnectionStatus({ kind: 'idle' });
+      coordinator.setConnectionStatus({ kind: 'idle' });
       repository?.reset();
       if (repository) {
-        provider.setSnapshot(repository.snapshot());
+        coordinator.setSnapshot(repository.snapshot());
       }
       return;
     }
@@ -139,7 +151,7 @@ export function activate(context: vscode.ExtensionContext): void {
     repository = repo;
     repo.setPinnedThreadIds(pinStore.getPinnedThreadIds());
     const generation = ++probeGeneration;
-    provider.setConnectionStatus({ kind: 'connecting' });
+    coordinator.setConnectionStatus({ kind: 'connecting' });
 
     const pageSize = getPageSize();
 
@@ -152,8 +164,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
       await pruneLoadedPins(pinStore, repo);
       repo.setPinnedThreadIds(pinStore.getPinnedThreadIds());
-      provider.setSnapshot(repo.snapshot());
-      provider.setConnectionStatus({ kind: 'ready' });
+      coordinator.setSnapshot(repo.snapshot());
+      coordinator.setConnectionStatus({ kind: 'ready' });
       output.appendLine(
         `[thread/list] Read ${activePage.threads.length} active and ${archivePage.threads.length} archived thread metadata record(s).`
       );
@@ -163,7 +175,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const message = connectionErrorMessage(error);
-      provider.setConnectionStatus({ kind: 'error', message });
+      coordinator.setConnectionStatus({ kind: 'error', message });
       output.appendLine(`[connection] ${message}`);
       if (notifyOnError) {
         await showConnectionError(error, requestThreadRefresh);
@@ -187,14 +199,14 @@ export function activate(context: vscode.ExtensionContext): void {
       if (generation !== probeGeneration) {
         return;
       }
-      provider.setSnapshot(repository.snapshot());
-      provider.setConnectionStatus({ kind: 'ready' });
+      coordinator.setSnapshot(repository.snapshot());
+      coordinator.setConnectionStatus({ kind: 'ready' });
     } catch (error) {
       if (generation !== probeGeneration) {
         return;
       }
       const message = connectionErrorMessage(error);
-      provider.setConnectionStatus({ kind: 'error', message });
+      coordinator.setConnectionStatus({ kind: 'error', message });
       output.appendLine(`[thread/list] ${message}`);
       await showConnectionError(error, requestThreadRefresh);
     }
@@ -205,28 +217,29 @@ export function activate(context: vscode.ExtensionContext): void {
   repository.setPinnedThreadIds(pinStore.getPinnedThreadIds());
   const conversationPanels = new ConversationPanelManager({
     extensionUri: context.extensionUri,
-    readThread,
+    coordinator,
     logger: output
   });
 
   context.subscriptions.push(
     output,
     provider,
+    coordinator,
     conversationPanels,
     { dispose: () => activeClient?.dispose() },
     vscode.window.registerWebviewViewProvider('codexThreadManager.threads', provider),
     vscode.window.registerWebviewPanelSerializer(CONVERSATION_VIEW_TYPE, conversationPanels),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      provider.resetWorkspace();
+      coordinator.resetWorkspace();
       const client = activeClient ?? replaceClient();
       repository = new ThreadRepository(client);
       repository.setPinnedThreadIds(pinStore.getPinnedThreadIds());
-      provider.setSnapshot(repository.snapshot());
+      coordinator.setSnapshot(repository.snapshot());
       void requestThreadRefresh(false);
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('workbench.reduceMotion')) {
-        provider.refreshReduceMotion();
+        coordinator.refreshReduceMotion();
       }
       if (event.affectsConfiguration('codexThreadManager.codexPath')) {
         replaceClient();
@@ -245,21 +258,28 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('codexThreadManager.openThread', (threadId?: string) =>
       openThread(threadId, repository, conversationPanels)
     ),
+    vscode.commands.registerCommand('codexThreadManager.scrollConversationUp', () => coordinator.scrollFocusedConversation('up')),
+    vscode.commands.registerCommand('codexThreadManager.scrollConversationDown', () => coordinator.scrollFocusedConversation('down')),
+    vscode.commands.registerCommand('codexThreadManager.reloadConversation', () => coordinator.reloadFocusedConversation()),
+    vscode.commands.registerCommand('codexThreadManager.toggleConversationLocation', () => coordinator.toggleFocusedConversationLocation()),
     vscode.commands.registerCommand('codexThreadManager.focusConversationPrompt', async () => {
-      await vscode.commands.executeCommand('codexThreadManager.threads.focus');
-      provider.focusConversationPrompt();
+      if (!conversationPanels.focusPrompt()) {
+        await vscode.commands.executeCommand('codexThreadManager.threads.focus');
+        coordinator.focusConversationPrompt();
+      }
     }),
     vscode.commands.registerCommand('codexThreadManager.loadMoreActive', () => loadMoreThreads('active')),
     vscode.commands.registerCommand('codexThreadManager.loadMoreArchive', () => loadMoreThreads('archive')),
-    vscode.commands.registerCommand('codexThreadManager.pin', (item?: ThreadTreeItem | string) => pinThread(item, pinStore, repository, provider)),
-    vscode.commands.registerCommand('codexThreadManager.unpin', (item?: ThreadTreeItem | string) => unpinThread(item, pinStore, repository, provider)),
-    vscode.commands.registerCommand('codexThreadManager.rename', (item?: ThreadTreeItem | string) => renameThread(item, repository, provider)),
-    vscode.commands.registerCommand('codexThreadManager.archive', (item?: ThreadTreeItem | string) => archiveThread(item, pinStore, repository, provider)),
-    vscode.commands.registerCommand('codexThreadManager.unarchive', (item?: ThreadTreeItem | string) => unarchiveThread(item, repository, provider))
+    vscode.commands.registerCommand('codexThreadManager.pin', (item?: ThreadTreeItem | string) => pinThread(item, pinStore, repository, coordinator)),
+    vscode.commands.registerCommand('codexThreadManager.unpin', (item?: ThreadTreeItem | string) => unpinThread(item, pinStore, repository, coordinator)),
+    vscode.commands.registerCommand('codexThreadManager.rename', (item?: ThreadTreeItem | string) => renameThread(item, repository, coordinator)),
+    vscode.commands.registerCommand('codexThreadManager.archive', (item?: ThreadTreeItem | string) => archiveThread(item, pinStore, repository, coordinator)),
+    vscode.commands.registerCommand('codexThreadManager.unarchive', (item?: ThreadTreeItem | string) => unarchiveThread(item, repository, coordinator))
   );
 
   output.appendLine('Codex Thread Manager activated.');
   void vscode.commands.executeCommand('setContext', CONVERSATION_OPEN_CONTEXT_KEY, false);
+  void vscode.commands.executeCommand('setContext', CONVERSATION_FOCUSED_CONTEXT_KEY, false);
   void requestThreadRefresh(true);
 }
 
@@ -272,7 +292,7 @@ async function pinThread(
   item: ThreadTreeItem | string | undefined,
   pinStore: PinStore,
   repository: ThreadRepository | undefined,
-  provider: ThreadListWebviewProvider
+  coordinator: ConversationCoordinator
 ): Promise<void> {
   const thread = threadFromArgument(item, repository);
   if (!thread || thread.archived) {
@@ -282,7 +302,7 @@ async function pinThread(
   await pinStore.pin(thread.id);
   repository?.setPinnedThreadIds(pinStore.getPinnedThreadIds());
   if (repository) {
-    provider.setSnapshot(repository.snapshot());
+    coordinator.setSnapshot(repository.snapshot());
   }
 }
 
@@ -290,7 +310,7 @@ async function unpinThread(
   item: ThreadTreeItem | string | undefined,
   pinStore: PinStore,
   repository: ThreadRepository | undefined,
-  provider: ThreadListWebviewProvider
+  coordinator: ConversationCoordinator
 ): Promise<void> {
   const thread = threadFromArgument(item, repository);
   if (!thread) {
@@ -300,7 +320,7 @@ async function unpinThread(
   await pinStore.unpin(thread.id);
   repository?.setPinnedThreadIds(pinStore.getPinnedThreadIds());
   if (repository) {
-    provider.setSnapshot(repository.snapshot());
+    coordinator.setSnapshot(repository.snapshot());
   }
 }
 
@@ -319,7 +339,7 @@ async function pruneLoadedPins(pinStore: PinStore, repository: ThreadRepository)
 async function renameThread(
   item: ThreadTreeItem | string | undefined,
   repository: ThreadRepository | undefined,
-  provider: ThreadListWebviewProvider
+  coordinator: ConversationCoordinator
 ): Promise<void> {
   const thread = threadFromArgument(item, repository);
   if (!thread || thread.archived || !repository) {
@@ -346,7 +366,7 @@ async function renameThread(
   }
   try {
     await repository.renameThread(thread.id, trimmedName);
-    provider.setSnapshot(repository.snapshot());
+    coordinator.setSnapshot(repository.snapshot());
   } catch (error) {
     await showOperationError('rename the thread', error);
   }
@@ -356,7 +376,7 @@ async function archiveThread(
   item: ThreadTreeItem | string | undefined,
   pinStore: PinStore,
   repository: ThreadRepository | undefined,
-  provider: ThreadListWebviewProvider
+  coordinator: ConversationCoordinator
 ): Promise<void> {
   const thread = threadFromArgument(item, repository);
   if (!thread || thread.archived || !repository) {
@@ -371,11 +391,11 @@ async function archiveThread(
     await repository.archiveThread(thread.id);
     await pinStore.unpin(thread.id);
     repository.setPinnedThreadIds(pinStore.getPinnedThreadIds());
-    provider.setSnapshot(repository.snapshot());
+    coordinator.setSnapshot(repository.snapshot());
     const selection = await vscode.window.showInformationMessage(`Archived “${thread.title}”.`, 'Undo');
     if (selection === 'Undo') {
       await repository.unarchiveThread(thread.id);
-      provider.setSnapshot(repository.snapshot());
+      coordinator.setSnapshot(repository.snapshot());
     }
   } catch (error) {
     await showOperationError('archive the thread', error);
@@ -385,7 +405,7 @@ async function archiveThread(
 async function unarchiveThread(
   item: ThreadTreeItem | string | undefined,
   repository: ThreadRepository | undefined,
-  provider: ThreadListWebviewProvider
+  coordinator: ConversationCoordinator
 ): Promise<void> {
   const thread = threadFromArgument(item, repository);
   if (!thread || !thread.archived || !repository) {
@@ -398,7 +418,7 @@ async function unarchiveThread(
   }
   try {
     await repository.unarchiveThread(thread.id);
-    provider.setSnapshot(repository.snapshot());
+    coordinator.setSnapshot(repository.snapshot());
   } catch (error) {
     await showOperationError('restore the thread', error);
   }

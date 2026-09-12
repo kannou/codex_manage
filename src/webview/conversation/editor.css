@@ -1,0 +1,20 @@
+body[data-location='editor'] {
+  padding: 12px 20px 24px;
+  background: var(--vscode-editor-background);
+}
+
+body[data-location='editor'] #app {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+body[data-location='editor'] .conversation-header,
+body[data-location='editor'] .conversation-composer {
+  background: var(--vscode-editor-background);
+}
+
+@media (max-width: 480px) {
+  body[data-location='editor'] {
+    padding: 8px 10px 20px;
+  }
+}

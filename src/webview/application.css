@@ -1,7 +1,3 @@
-:root {
-  color-scheme: light dark;
-}
-
 body {
   margin: 0;
   padding: 8px 10px 20px;
@@ -162,7 +158,7 @@ button.new-conversation:disabled {
   width: 100%;
   min-width: 0;
   min-height: 46px;
-  padding: 6px 80px 6px 8px;
+  padding: 6px 104px 6px 8px;
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
@@ -174,8 +170,8 @@ button.new-conversation:disabled {
   cursor: pointer;
 }
 
-.thread-card--single-action .thread-open {
-  padding-right: 34px;
+.thread-card--two-actions .thread-open {
+  padding-right: 58px;
 }
 
 .thread-open:focus-visible {
@@ -1053,4 +1049,55 @@ button.conversation-stop.is-disabled {
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }
+}
+
+.conversation-menu {
+  position: relative;
+  flex: 0 0 24px;
+}
+
+.conversation-menu > summary {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.conversation-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-menu > summary:hover,
+.conversation-menu[open] > summary {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.conversation-menu-items {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 4;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--vscode-menu-background, var(--vscode-editor-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+}
+
+.conversation-menu-items > button {
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  color: inherit;
+  background: transparent;
+}
+
+.conversation-menu-items > button:hover {
+  color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
 }

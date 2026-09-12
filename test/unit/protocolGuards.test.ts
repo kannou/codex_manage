@@ -389,3 +389,26 @@ test('parses reasoning summary streaming notifications', () => {
   assert.equal(part?.method, 'item/reasoning/summaryPartAdded');
   assert.equal(delta?.method, 'item/reasoning/summaryTextDelta');
 });
+
+test('accepts nullable image detail in history and notifications but rejects unknown detail values', () => {
+  for (const type of ['image', 'localImage']) {
+    for (const detail of [undefined, null, 'auto', 'low', 'high', 'original']) {
+      const item = { type: 'userMessage', id: 'image-message', clientId: null, content: [
+        { type, detail, ...(type === 'image' ? { url: 'data:image/png;base64,AA==' } : { path: '/workspace/image.png' }) }
+      ] };
+      const thread = { ...createThread(), turns: [{ ...createTurn(), items: [item] }] };
+      assert.doesNotThrow(() => parseThreadReadResponse({ thread }, thread.id));
+      assert.doesNotThrow(() => parseConversationNotification('item/completed', {
+        threadId: thread.id, turnId: 'turn-1', item, completedAtMs: 1
+      }));
+    }
+    for (const detail of ['unknown', 1, {}]) {
+      const item = { type: 'userMessage', id: 'bad-image', clientId: null, content: [
+        { type, detail, url: 'data:image/png;base64,AA==', path: '/workspace/image.png' }
+      ] };
+      assert.throws(() => parseThreadReadResponse({
+        thread: { ...createThread(), turns: [{ ...createTurn(), items: [item] }] }
+      }), /invalid thread\/read/u);
+    }
+  }
+});

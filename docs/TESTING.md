@@ -78,10 +78,17 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Confirm the native **Threads** title contains the list-level refresh/settings controls and the list screen does not duplicate them.
 - Collapse Pinned or Recent threads, expand Archive, navigate into a conversation and back, then reload the window and confirm the group visibility is restored.
 - Select the title, description, and blank body area of a thread card and confirm each opens the matching conversation without opening an editor tab.
+- Use the row's **Open in editor** action and the conversation header's **⋯ → Open in editor** action. Confirm the sidebar returns to the list and the editor displays the same draft, attachments, and running turn.
+- Send from the editor, switch with **⋯ → Open in sidebar** during streaming, then Stop and send again after completion. Confirm only one screen accepts conversation operations and the editor tab closes on return.
+- Close a running conversation tab, open another thread, and reopen the first. Confirm neither turn is stopped by navigation, and the first thread retains its latest transcript and draft.
+- Switch while Send or Reload is pending. Confirm a late response cannot replace the selected conversation or erase a newly edited draft.
+- With an editor conversation open, use the prompt-focus shortcut and confirm focus stays in the editor. Reveal or recreate the sidebar and confirm it displays the list without taking over the conversation.
+- Repeat the prompt-focus shortcut from within the conversation Webview, another editor, and the sidebar. Confirm focus remains in the input after the tab is revealed. Open the **⋯** menu with keyboard and mouse, then confirm outside clicks close it and Escape returns focus to its trigger.
+- Reload the VS Code window with a saved conversation tab and confirm at most one editor conversation is restored. Check narrow editor groups and light, dark, and high-contrast themes.
 - Hover and keyboard-focus active cards to reveal Pin/Unpin, Rename, and Archive icons; confirm archived cards show only Restore and touch-style input does not hide the actions.
 - Select each icon and the gaps around the icon strip and confirm none opens a conversation or triggers a neighboring card action.
 - Use **Back** and confirm the loaded list, scroll position, and selected-row focus are restored where possible.
-- Confirm the conversation header shows icon-only Back and Reload controls with accurate tooltips and accessible names; verify **Refresh Threads** updates the list while conversation Reload re-synchronizes only the selected conversation.
+- Confirm the conversation header shows an icon-only Back control in the sidebar and a **⋯** menu containing **Open in editor/sidebar** and **Reload**, with accurate tooltips and accessible names. Verify the menu closes on selection or Escape, and **Refresh Threads** updates the list while **⋯ → Reload** re-synchronizes only the selected conversation.
 - Open two different threads in sequence and confirm their histories do not mix.
 - Bookmark turns in two different threads and confirm each star's pressed state, thread isolation, and workspace persistence after **Developer: Reload Window**; stored bookmarks for turns missing from loaded history must not appear.
 - Open the compact `★ count` menu with mouse and keyboard, confirm entries follow conversation order and include user-message previews, then select one and confirm the destination turn scrolls into view, receives focus, and is announced without losing bookmark state during streaming updates.
@@ -90,7 +97,7 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Double-click Send while creating a conversation and confirm only one thread is created; repeat with an App Server failure and confirm the draft text remains available for retry.
 - Start creating a conversation and immediately select **Back**; confirm a late response does not reopen the conversation or overwrite the visible list, and the completed thread appears once after the list updates.
 - Send a multiline text prompt with Ctrl/Cmd+Enter and confirm Enter alone inserts a line break.
-- From the editor and conversation history, use Ctrl+Alt+Enter on Windows/Linux or Cmd+Alt+Enter on macOS and confirm the current conversation prompt receives focus. Repeat with the sidebar hidden, then confirm the shortcut does nothing on the list, while loading, disconnected, waiting for input, or sending.
+- From the editor and conversation history, use Ctrl+Alt+Enter on Windows/Linux or Cmd+Alt+Enter on macOS and confirm the current conversation prompt receives focus. Repeat with the sidebar hidden, then confirm the shortcut does nothing on the list, while disconnected, waiting for input, or sending. In an editor still loading history, confirm the focus request is applied after loading.
 - Confirm Send/Stop stays aligned to the right edge when the composer status is empty, running, stopping, waiting for input, or unavailable; at narrow sidebar widths, status text must wrap without pushing the controls off-screen.
 - Double-click Send and press the shortcut repeatedly while sending; confirm only one turn starts and the draft clears only after acceptance.
 - Type `@` at the start and in the middle of a prompt, search for nested workspace files, and select candidates with Arrow Up/Down plus Enter or Tab and with the mouse. Confirm each selection removes only its `@query`, creates the same file chip as **Mention files…**, sends the same file reference, and never shows or opens workspace-external results.
@@ -124,6 +131,22 @@ Record the environment and result for each release candidate. Do not mark Phase 
 - Install the generated VSIX into a clean VS Code profile and repeat the basic list/pin/rename/archive flow.
 - Confirm the installed VSIX can load both the thread list and sidebar conversation styles/scripts.
 
+## Phase 3 presentation parity
+
+Run these checks in both the sidebar and the editor, including a round trip while the operation is pending. Automated coordinator tests cover routing and state retention; they do not validate Webview rendering or keyboard behavior.
+
+| Area | Manual check |
+| --- | --- |
+| Runtime and attachments | Change model, reasoning, speed, and permissions; add images, file mentions, and Skills. Switch presentation, remove an attachment, and send. Confirm the intended settings and inputs reach the turn. If a picker remains open during a switch, confirm its result appears in the destination. |
+| Suggestions | Search with `@` and `$`, switch while a search is pending, then search again. Old candidates must not appear. Check selection with mouse, keyboard, and Japanese IME. |
+| Requests | Switch while an approval, question, or MCP form is pending. Complete it in the destination and confirm exactly one response is sent. |
+| Navigation and output | Exercise Latest, bookmark toggles and navigation, message/code copying, file links, and changed-file links in both presentations. Switch during bookmark saving and confirm the destination shows the saved state. |
+| Usage | Check account usage and context remaining in both presentations, including updates while a turn is running. |
+| Header and focus | Use **⋯ → Reload**, switch presentation, and focus the prompt using the existing shortcut. Check menu dismissal and focus restoration. |
+| Layout | Repeat in narrow editor groups and light, dark, and high-contrast themes on Windows, WSL, and macOS. Inspect long messages, code blocks, forms, and popups for clipping and visible keyboard focus. |
+
+Record the platform, theme, tested areas, and failures in `EDITOR_TAB_CONVERSATION_PLAN.md`. These visual checks remain pending until performed in a running VS Code instance.
+
 ## Real CLI smoke test
 
 The opt-in smoke test remains read-only even though the extension can send messages. It calls `initialize`, `thread/list`, and, when a matching thread exists, `thread/read(includeTurns: true)`. It asserts only the thread ID and turn-array shape and does not print conversation content:
@@ -134,3 +157,15 @@ npm test
 ```
 
 Do not extend this smoke test with rename or archive operations against a user's normal Codex home.
+
+## Conversation keyboard shortcuts
+
+- In an existing conversation's composer, transcript, and menus, use Ctrl+Alt+R (macOS: Cmd+Alt+R) and confirm the current conversation reloads once, retaining draft text and attachments.
+- Use Ctrl+Alt+M (macOS: Cmd+Alt+M) to toggle editor/sidebar, including during streaming. Confirm the draft and active turn survive and no extra turn starts.
+- Repeat from the thread list, an unsent new conversation, another text editor, terminal, and the passive sidebar while the editor owns the conversation. Neither command should act on the conversation.
+- Hide or close the view, switch windows, and return; verify stale focus does not activate these bindings outside the conversation.
+- Confirm both commands can be rebound through VS Code Keyboard Shortcuts and the existing prompt-focus shortcut still works.
+
+- With focus in the composer and transcript, use Ctrl+PageUp/PageDown (also Control on macOS). Confirm the conversation scrolls instead of changing tabs, while the composer caret and draft remain unchanged. Repeat while streaming and after toggling presentation.
+- Change `codexThreadManager.conversationScrollAmount` from 400 to 100 and then 800. The next keypress should use the new pixel distance; at the beginning/end of the document it should stop at the boundary.
+- Focus a different editor or terminal and confirm these bindings no longer scroll Codex Thread Manager. On macOS laptops without dedicated PageUp/PageDown keys, check the equivalent Fn+arrow combinations.

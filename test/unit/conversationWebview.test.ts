@@ -34,6 +34,8 @@ test('creates a nonce-protected shell with escaped persisted state', () => {
   assert.equal(html.includes('<title><script>'), false);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/u);
   assert.match(html, /data-thread-id="thread-&quot;quoted&quot;"/u);
+  assert.match(html, /data-location="editor"/u);
+  assert.match(html, /<main id="app"/u);
 });
 
 test('restricts webview capabilities and local resource roots', () => {
