@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Added an operable editor-tab presentation for existing conversations and shortcuts to focus the prompt, reload, switch presentation, and scroll.
+- Preserved the active conversation session, draft, and attachments while switching between the sidebar and editor tab.
+- Added account reset-ticket counts and available ticket details to the usage panel.
+- Accepted stored image history with a null detail field for protocol compatibility.
+
 ## 0.1.0 - 2026-07-25
 
 - Added a Japanese README and language links between the English and Japanese documentation.

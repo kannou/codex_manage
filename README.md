@@ -14,13 +14,16 @@ The MVP is packaged for private VSIX installation. Marketplace publication is no
 - Archives threads, supports immediate Undo, and restores archived threads.
 - Loads large thread collections page by page.
 - Updates names, archive state, and execution status from App Server notifications.
-- Opens a selected thread's conversation in the same Codex sidebar, including stored user/Codex messages, turn state, and summarized work cards.
+- Opens an existing conversation in the sidebar or an editor tab, showing stored messages, turn state, and summarized work cards. Switching keeps the active turn, draft, and attachments, with one operable conversation screen per window.
 - Sends text prompts to an existing thread, streams Codex replies in place, and stops the active turn when needed.
 - Adds PNG, JPEG, GIF, or WebP images, host-selected file references, and enabled workspace Skills to the next message from the composer Add menu.
 - Suggests workspace files from `@query` and enabled Skills from `$query`, with keyboard, mouse, and IME-safe composer behavior.
 - Starts a workspace-scoped conversation from the sidebar, applies the selected Runtime settings, and sends its first text prompt without creating a duplicate list entry.
 - Shows the selected model, reasoning, and permission labels in the Runtime trigger, adding Fast only when the faster speed is selected.
 - Keeps the last confirmed transcript visible across disconnects and re-synchronizes it with `thread/resume` plus `thread/read` after reconnecting.
+- Retains per-thread drafts and attachments while navigating, shows a Latest control when new content arrives off-screen, and marks unseen completed threads in the view.
+- Groups completed work, lists changed workspace files, and provides copy actions for final answers and code blocks.
+- Shows context-window remaining and account usage, including available reset-ticket counts and details when the App Server provides them.
 - Preserves the list position when navigating back and restores the selected conversation by re-reading history after a VS Code window reload.
 - Keeps Pinned and Recent threads expanded by default, keeps Archive collapsed, and remembers each group's visibility.
 - Opens a conversation from the full thread-card body and exposes pin, rename, archive, and restore as inline icon actions.
@@ -50,13 +53,13 @@ npm run package
 
 If the local npm cache is incomplete, retry with network access using `npm run bootstrap`.
 
-Then install `codex-thread-manager-0.1.0.vsix` using either:
+Then install `codex-thread-manager-0.2.0.vsix` using either:
 
 - VS Code: **Extensions: Install from VSIX...**
 - Command line:
 
 ```bash
-code --install-extension codex-thread-manager-0.1.0.vsix
+code --install-extension codex-thread-manager-0.2.0.vsix
 ```
 
 Reload VS Code after installation.
@@ -83,6 +86,8 @@ Reload VS Code after installation.
 Use a row's **↗ (Open in editor)** action or **⋯ → Open in editor** in the conversation header to move an existing conversation into an editor tab. The tab uses the same composer, **Send**, **Stop**, and Reload controls. Select **⋯ → Open in sidebar** to close the tab and return to the sidebar.
 
 Only one conversation screen is operable per window. Switching preserves the running turn, draft, and attachments. Closing the tab keeps the turn running and leaves the sidebar on its list; reopen the thread to see its latest state.
+
+With focus in an existing conversation, use **Ctrl+Alt+Enter** to focus the prompt, **Ctrl+Alt+R** to reload, and **Ctrl+Alt+M** to switch between the editor and sidebar (**Cmd+Alt+Enter**, **Cmd+Alt+R**, and **Cmd+Alt+M** on macOS). These shortcuts are limited to existing conversations and can be changed in VS Code Keyboard Shortcuts by searching for **Focus Conversation Prompt**, **Reload Conversation**, or **Toggle Conversation Location**. Use **Ctrl+PageUp** / **Ctrl+PageDown** (Control on macOS too) to scroll the focused conversation without moving the prompt caret. Change the scroll distance with **Conversation Scroll Amount** (`codexThreadManager.conversationScrollAmount`), default 400 pixels and range 1–10000.
 
 Only threads whose `cwd` exactly matches one of the open workspace folder paths are shown. Threads started in a nested subdirectory are not included in this MVP.
 
@@ -154,7 +159,7 @@ The local list remains unchanged when the App Server rejects an operation. Revie
 - Standard MCP form elicitations support strings, numbers, booleans, and single-select enums; OpenAI-specific forms, multi-select enums, and URL-mode elicitations can only be declined or cancelled.
 - Raw reasoning content, command output, file diffs, and tool arguments/results are intentionally not displayed.
 - Some older turns may contain only summary history, which is indicated in the conversation view.
-- Very large stored histories are currently loaded and rendered as one snapshot; progressive rendering is planned for a later vNext phase.
+- Very large stored histories are currently loaded and rendered as one snapshot; progressive rendering is not currently implemented.
 - New conversations require a first text message; creating an empty thread and choosing among multiple workspace roots are not available yet.
 - No thread deletion or bulk operations.
 - No pin synchronization outside the current VS Code workspace.
@@ -167,7 +172,6 @@ The local list remains unchanged when the App Server rejects an operation. Revie
 ```bash
 nvm use
 npm run bootstrap:offline
-npm run doctor
 npm run verify
 npm run test:vscode
 npm run package
@@ -198,7 +202,3 @@ npm run generate:protocol
 ```
 
 Commit the dependency, generated snapshot, and compatibility-test changes together.
-
-With focus inside an existing conversation, use **Ctrl+Alt+R** to Reload and **Ctrl+Alt+M** to toggle between the editor and sidebar (**Cmd+Alt+R** / **Cmd+Alt+M** on macOS). These bindings work in the composer, transcript, and conversation menus, and are inactive in the thread list, unsent new conversations, other editors, and terminals. Customize them in VS Code Keyboard Shortcuts by searching for `Reload Conversation` or `Toggle Conversation Location`.
-
-Use **Ctrl+PageUp** / **Ctrl+PageDown** to scroll the focused conversation (Control on macOS too), without changing the composer caret. Configure the distance with **Conversation Scroll Amount** (`codexThreadManager.conversationScrollAmount`): default 400 pixels, integer range 1–10000. Changes apply on the next keypress.

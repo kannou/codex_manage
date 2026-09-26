@@ -2,6 +2,8 @@
 
 The current release target is a privately distributed VSIX. Marketplace publication and marketplace metadata are out of scope.
 
+This is the canonical manual-check list and evidence record for the project. Plans and implementation notes link here instead of maintaining separate copies of the same checklist. Record the tested extension version, platform, theme, and result for each release candidate.
+
 ## Automated checks
 
 Use the pinned Node.js/npm versions and install the locked dependency tree:
@@ -16,12 +18,12 @@ npm run bootstrap:offline
 Run before creating a VSIX:
 
 ```bash
-npm run doctor
-npm run verify:protocol
 npm run verify
 npm run test:vscode
 npm run package
 ```
+
+`verify` already runs the dependency doctor and protocol drift check along with the unit/integration tests, type checks, lint, build, and package-content check.
 
 The GitHub Actions workflow runs quality, packaging, and Extension Host checks on Windows, macOS, and Linux only when started manually with **Run workflow**. Pushes and pull requests do not start it automatically, preserving the repository's limited Actions minutes. The local Extension Host test uses VS Code 1.92.2, matching the minimum supported release line.
 
@@ -133,19 +135,15 @@ Record the environment and result for each release candidate. Do not mark Phase 
 
 ## Phase 3 presentation parity
 
-Run these checks in both the sidebar and the editor, including a round trip while the operation is pending. Automated coordinator tests cover routing and state retention; they do not validate Webview rendering or keyboard behavior.
+Run the matching items from the [manual acceptance checklist](#manual-acceptance-checklist) in both the sidebar and editor tab. Include a round trip while an operation is pending. Automated coordinator tests cover routing and state retention; they do not validate Webview rendering or keyboard behavior.
 
-| Area | Manual check |
-| --- | --- |
-| Runtime and attachments | Change model, reasoning, speed, and permissions; add images, file mentions, and Skills. Switch presentation, remove an attachment, and send. Confirm the intended settings and inputs reach the turn. If a picker remains open during a switch, confirm its result appears in the destination. |
-| Suggestions | Search with `@` and `$`, switch while a search is pending, then search again. Old candidates must not appear. Check selection with mouse, keyboard, and Japanese IME. |
-| Requests | Switch while an approval, question, or MCP form is pending. Complete it in the destination and confirm exactly one response is sent. |
-| Navigation and output | Exercise Latest, bookmark toggles and navigation, message/code copying, file links, and changed-file links in both presentations. Switch during bookmark saving and confirm the destination shows the saved state. |
-| Usage | Check account usage and context remaining in both presentations, including updates while a turn is running. |
-| Header and focus | Use **⋯ → Reload**, switch presentation, and focus the prompt using the existing shortcut. Check menu dismissal and focus restoration. |
-| Layout | Repeat in narrow editor groups and light, dark, and high-contrast themes on Windows, WSL, and macOS. Inspect long messages, code blocks, forms, and popups for clipping and visible keyboard focus. |
+Record evidence in the [editor presentation matrix](#phase-3-presentation-evidence) below. These visual checks require a running VS Code instance.
 
-Record the platform, theme, tested areas, and failures in `EDITOR_TAB_CONVERSATION_PLAN.md`. These visual checks remain pending until performed in a running VS Code instance.
+### Phase 3 presentation evidence
+
+| Environment / version | Theme / width | Areas checked | Result / evidence |
+| --- | --- | --- | --- |
+| Pending | Pending | Runtime, attachments, suggestions, requests, navigation, usage, focus, layout | Pending |
 
 ## Real CLI smoke test
 
